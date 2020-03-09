@@ -16,3 +16,7 @@ alias p='python3'
 function cd {
           builtin cd "$@" && ls -ltrha
 }
+############ update bashrc every time
+if [ -n "$BASH_VERSION" ] && [ -f $HOME/.bashrc ];then
+    source $HOME/.bashrc
+fi
