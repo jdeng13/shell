@@ -12,3 +12,6 @@ if ( $#argv > 1 ) then
 else
   setenv _SC_MODE_ "NONE"
 endif
+
+# get the current working directory
+set cur_dir = $cwd;
