@@ -44,3 +44,4 @@ endif
 
 # get the current working directory
 set cur_dir = $cwd;
+alias lc "ls $cwd/\!*"
