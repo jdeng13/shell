@@ -19,7 +19,7 @@ alias cr "gvim ~/.cshrc"
 alias o "source ~/open_gnomeTerminal.tcl"
 alias gr "grep -r"
 alias sc "source ~/.cshrc"
-alias cp "cp -rf"
+alias cp "cp -rfp"
 
 #### Alias for directories ####
 alias dt "cd /data"
