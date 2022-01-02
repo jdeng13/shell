@@ -112,16 +112,16 @@ cd() { builtin cd "$@" && ls -lthr;}
 alias .="cd ../"
 alias ..="cd ../../"
 alias ...="cd ../../../"
+alias ....="cd ../../../../"
 alias v='vim'
-alias g='gvim -p'
-alias gn='gvim --noplugin'
-alias p='python3.9'
+alias g='mvim -p'
+alias p='python3.10'
 alias ipython='ipython2'
-alias vr="gvim ~/.vimrc"
-alias cr="gvim ~/.zshrc"
+alias vr="mvim ~/.vimrc"
+alias cr="mvim ~/.zshrc"
 alias gr="grep -r"
 alias sc="source ~/.zshrc"
-alias cp="cp -rf"
+alias cp="cp -rfp"
 
 #### Alias for directories ####
 alias vd="cd ~/.vim"
