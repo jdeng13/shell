@@ -1,0 +1,92 @@
+#!/bin/sh
+#************************************************************************CPY10*#
+#*   Copyright Mentor Graphics Corporation 2011-2014                     CPY11*# 
+#*              All Rights Reserved.                                     CPY12*#
+#*                                                                       CPY13*#
+#*   THIS WORK CONTAINS TRADE SECRET AND PROPRIETARY INFORMATION         CPY14*#
+#*   WHICH IS THE PROPERTY OF MENTOR GRAPHICS CORPORATION OR ITS         CPY15*#
+#*   LICENSORS AND IS SUBJECT TO LICENSE TERMS.                          CPY16*#
+################################################################################
+
+#test -z "$COMP_VERSION" && COMP_VERSION=8.6
+if [ -z "$COMP_VERSION" ]
+then
+   if [ -d "$MGC_HOME/pkgs/icv_comp/8.4" ]
+   then
+        COMP_VERSION=8.4
+   else
+        COMP_VERSION=8.6
+   fi
+fi
+
+
+export COMP_VERSION
+
+progname=`basename $0`
+
+if test ! -x $CALIBRE_HOME/bin/calibre_env
+then
+  if test -x $MGC_HOME/bin/calibre_env
+  then
+    CALIBRE_HOME=$MGC_HOME
+  else
+    # try to form canonical path to look for script
+    localdir=`/bin/pwd`
+    dotdir='^\.$'
+    testdir=`dirname $0 | sed -e "s!$dotdir!$localdir!" -e 's!/shared/pkgs/.*!!' -e 's!/pkgs/.*!!' -e 's!/bin/*$!!'`
+    testloc="$testdir/bin/calibre_env"
+    if test -x "$testloc"
+    then
+      CALIBRE_HOME=$testdir
+      # jam at front of PATH, just incase
+      PATH=$CALIBRE_HOME/bin:$PATH
+      export PATH
+      test -z "$CALIBRE_SKIP_OS_CHECKS" \
+        && echo "WARNING: Software tree location not set or invalid, using \$CALIBRE_HOME=$CALIBRE_HOME"
+    else
+      echo "ERROR: Invalid software tree, could not find \$MGC_HOME/bin/calibre_env." >&2
+      exit 1
+    fi
+  fi
+fi
+MGC_HOME="$CALIBRE_HOME"
+export CALIBRE_HOME MGC_HOME
+. $CALIBRE_HOME/bin/calibre_env
+# calibre_env already output any error messages, just exit if MGC_VCO null
+test -z "$MGC_VCO" && exit 1
+
+# if the utility to check library search paths is available, use it to check
+# any library search path variables for directories which might confict with calibre usage
+slp="$CALIBRE_HOME/pkgs/icv/pvt/set_shared_library_path"
+if test -x "$slp"
+then
+. $slp
+else
+    #last resort - using internal version
+    slpi="$CALIBRE_HOME/pkgs/icv_comp/$COMP_VERSION/pvt/set_shared_library_path"
+    if test -x "$slpi"
+    then
+        . $slpi
+    fi
+fi
+
+progname_dir=$CALIBRE_HOME/pkgs/icv_comp/$COMP_VERSION/bin
+
+if test ! -d "$progname_dir"
+then
+  echo "ERROR: Could not find or read directory: $progname_dir" >&2
+  exit 1
+fi
+
+# generic path does not include any width (or other) suffix
+fullpath=$progname_dir/$progname
+
+if test ! -x "$fullpath"
+then
+  echo "ERROR: Could not invoke $progname_dir/$progname " >&2
+  exit 1
+fi
+
+test -z "$CALIBRE_PREPROCESS_ONLY" \
+  && exec $fullpath "$@" \
+  || echo $fullpath "$@"

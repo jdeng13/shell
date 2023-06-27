@@ -1,0 +1,70 @@
+#!/bin/bash
+#************************************************************************CPY10*#
+#*   Copyright Mentor Graphics Corporation 2005-2020                     CPY11*#
+#*                    All Rights Reserved.                               CPY12*#
+#*                                                                       CPY13*#
+#*   THIS WORK CONTAINS TRADE SECRET AND PROPRIETARY INFORMATION         CPY14*#
+#*   WHICH IS THE PROPERTY OF MENTOR GRAPHICS CORPORATION OR ITS         CPY15*#
+#*   LICENSORS AND IS SUBJECT TO LICENSE TERMS.                          CPY16*#
+#************************************************************************CPY17*#
+
+# Prints the help message, functionize as needed for error handling as well
+display_help_msg()
+{
+    script_name=`basename $0`
+    echo "$script_name"
+    echo "Used as an entry point for SONR applications and flows."
+    echo "The selected application is based on the first option to the script."
+    echo "All other options are passed on to the chosen application."
+    echo
+    echo "Syntax: $script_name application_option [application_flags]"
+    echo "application_option's:"
+    echo "--cluster           Runs the SONR cluster model flow."
+    echo "--tree              Runs the SONR tree model flow."
+    echo "--to_rdb            Runs the SONR model to RDB flow."
+    echo "--concatenate_cv    Runs the SONR concatenate_cv flow."
+    echo "--model_generator   Runs the SONR model generator flow."
+    echo "--read              Runs the SONR Filepool dumping utility."
+    echo "--help / -h         Displays this message and exits."
+    echo
+}
+
+if [[ $# -lt 1 || "$1" = "--help" || "$1" = "-h" ]]; then
+    display_help_msg
+    exit 0
+fi
+
+app_arg=$1
+app_name=""
+if   [[ "$app_arg" = "--cluster" ]]; then
+    app_name="sonr"
+elif [[ "$app_arg" = "--tree" ]]; then
+    app_name="sonr_tree"
+elif [[ "$app_arg" = "--to_rdb" ]]; then
+    app_name="sonr2rdb"
+elif [[ "$app_arg" = "--concatenate_cv" ]]; then
+    app_name="concatenate_cv"
+elif [[ "$app_arg" = "--model_generator" ]]; then
+    app_name="model_generator"
+elif [[ "$app_arg" = "--read" ]]; then
+    app_name="sonr_read"
+else
+    echo "Invalid application option : $app_arg" >> /dev/stderr
+    echo "Displaying help message..."
+    echo
+    display_help_msg
+    exit 1
+fi
+
+py3=$MGC_HOME/bin/calpython3
+python_dir=$MGC_HOME/pkgs/icv/pvt/py
+SONR_PATH=$python_dir/sonr
+run_pye=$python_dir/enc_dec/run_pye.pyc
+pye_file=$SONR_PATH/$app_name.pye
+
+$py3 $run_pye -file $pye_file ${@:2}
+
+failed=$?
+exit $failed
+
+

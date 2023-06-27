@@ -1,0 +1,8 @@
+#! /bin/sh
+#\
+exec $MGC_HOME/pkgs/icv_comp/bin/tclsh "$0" "$@"
+
+eval exec $env(MGC_HOME)/bin/tclmsc -rdb2lpc $argv
+
+
+

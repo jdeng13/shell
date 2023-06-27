@@ -1,0 +1,86 @@
+#!/bin/sh
+#************************************************************************CPY11*#
+#*   Copyright Mentor Graphics Corporation 2005  All Rights Reserved.    CPY12*#
+#*                                                                       CPY13*#
+#*   THIS WORK CONTAINS TRADE SECRET AND PROPRIETARY INFORMATION         CPY14*#
+#*   WHICH IS THE PROPERTY OF MENTOR GRAPHICS CORPORATION OR ITS         CPY15*#
+#*   LICENSORS AND IS SUBJECT TO LICENSE TERMS.                          CPY16*#
+#************************************************************************CPY17*#
+#
+#
+
+# This script should be called with at least 4 arguments:
+# rcalibre <rundir> <env-var-count> <MGC_HOME> <MGC_HOME_VALUE> <LICENSE_FILE_NAME> <LICENSE_FILE_VALUE> ... <calibre_switches>
+
+# This script sets the working dir to the first argument: <rundir>.
+# Then it loops <env-var-count> number of times, setting env.vars to the specified values.
+# It then execs $MGC_HOME/bin/calibre with the rest of the arguments.
+
+rprogname=`basename $0`
+
+executable="calibre"
+case $rprogname in
+  "rcalibre")     executable="calibre";;
+  "rxcalibrate")  executable="xcalibrate";;
+  "rcalcd")       executable="calcd";;
+  "rcalibrewb")   executable="calibrewb";;
+  "rpdl_lib_mgr") executable="pdl_lib_mgr";;
+  "rcalcmon")     executable="calcmon";;
+  "rcal_svc")     executable="cal_svc";;
+esac
+
+if [ $# -lt 4 ]
+then
+	echo "Usage:   $rprogname <rundir> <env-var-count> <env_var_1> <env_var_value> <env_var_2> <env_var_value> ... [calibre_switches]"
+	echo "Example: $rprogname <rundir> 2 <MGC_HOME> <MGC_HOME_VALUE> <LICENSE_FILE_NAME> <LICENSE_FILE_VALUE> [calibre_switches]"
+	exit 1
+fi
+
+if [ -d $1 ]
+then
+	cd $1
+else
+	echo
+	echo "$1 is not a valid directory on this host. Exiting ..."
+	echo
+	exit 1
+fi
+
+ecount=$2
+shift 2
+
+i=0
+while [ $i -lt $ecount ]
+do
+	eval "${1}=\$2"
+	export $1
+	shift 2
+	i=`expr $i + 1`
+done
+
+if test -z "$MGC_HOME"
+then
+  echo
+  echo "The environment variable MGC_HOME not set. Exiting ..."
+  echo
+  exit 1
+fi
+
+if [ ! -d $MGC_HOME ]
+then
+	echo
+	echo "$MGC_HOME is not a valid MGC_HOME directory on this host. Exiting ..."
+	echo
+	exit 1
+fi
+
+
+if test -z "$CALIBRE_RCALIBRE_PROGNAME"
+then
+  progname=$executable
+else
+  progname="$CALIBRE_RCALIBRE_PROGNAME"
+fi
+
+exec $MGC_HOME/bin/$progname $*
+

@@ -1,0 +1,224 @@
+#!/bin/bash
+
+args=("$@")
+COUNT=$#
+
+thermalMapFile=""
+powerMapFile=""
+compositeMapFile=""
+waveformFile=""
+wdbdir=""
+outputdir=""
+databaseName=""
+projectName=""
+
+usage="Usage: thermal_rdb2dfmdb [-p projectName] [-thermal_map thermalMapRDB] [-power_map powerMapRDB] [-composite_map compositeMapRDB] [-waveform waveformFile ] [-wdb_dir wdbdir] [-output_dir outputDirectory] [-database_name databaseName]"
+
+for (( i=0;i<$COUNT;i++)); do
+    optionName=${args[${i}]}    
+    let i=i+1
+    optionValue=${args[${i}]}
+    if [ -z $optionValue ]; then
+        if [ $optionName !=  -help ]; then
+            echo "Warning: No option value is specified for $optionName."
+        fi
+    fi
+    case $optionName in 
+        -thermal_map)
+            thermalMapFile=$optionValue
+            ;;
+        -power_map)
+            powerMapFile=$optionValue
+            ;;
+        -composite_map)
+            compositeMapFile=$optionValue
+            ;;
+        -output_dir)
+            outputdir=$optionValue
+            ;;
+        -database_name)
+            databaseName=$optionValue
+            ;;
+        -waveform)
+            waveformFile=$optionValue
+            ;;
+        -wdb_dir)
+            wdbdir=$optionValue
+            ;;
+        -p) 
+            projectName="$optionValue"
+            ;;
+        -help)
+            echo "$usage"
+            exit 1
+            ;;
+        *)
+            echo "Error: Wrong option name $optionName"         
+            echo "$usage"
+            exit 1
+            ;;
+    esac 
+done
+
+if [ -n "$projectName" ]; then
+    
+    if [ ! -f ${projectName}_map.rdb ] && [ ! -f ${projectName}.rdb ] && [ ! -f ${projectName}_power.rdb ] && [ ! -f ${projectName}_composite.rdb ]; then
+        echo "Error: There is no rdb file with project name $projectName."
+          echo "$usage"
+          exit 1
+    fi
+
+    if [ -z "$thermalMapFile" ]; then   
+        thermalMapFile="${projectName}_map.rdb"
+        if [ -f ${projectName}_map.rdb ] ; then
+            if [ -f ${projectName}.rdb ] ; then
+                echo "Error: Both ${projectName}_map.rdb and ${projectName}.rdb files exist in current directory."
+                exit 1
+            else
+                if [ -z "$waveformFile" ]; then
+                    waveformFile="${projectName}_wf.rdb"
+                    if [ ! -f $waveformFile ] ; then
+                        echo "Warning: There is no $waveformFile in current directory."
+                        waveformFile=""
+                    fi
+                fi
+            fi            
+        else
+            thermalMapFile="${projectName}.rdb"
+        fi
+         
+        if [ ! -f $thermalMapFile ] ; then
+            echo "Warning: There is no $thermalMapFile in current directory."
+            thermalMapFile=""
+        fi
+    fi
+
+    if [ -z "$powerMapFile" ]; then 
+        powerMapFile="${projectName}_power.rdb"
+        if [ ! -f $powerMapFile ] ; then
+            echo "Warning: There is no $powerMapFile in current directory."
+            powerMapFile=""
+        fi
+    fi
+
+    if [ -z "$compositeMapFile" ]; then
+        compositeMapFile="${projectName}_composite.rdb"
+            if [ ! -f $compositeMapFile ] ; then
+                echo "Warning: There is no $compositeMapFile  in current directory."
+                compositeMapFile=""
+            fi
+    fi 
+
+    if [ -z "$databaseName" ]; then 
+        databaseName="${projectName}_dfmdb"
+    fi
+
+fi
+
+if [ -z $thermalMapFile ] && [ -z $powerMapFile ] && [ -z $compositeMapFile ]; then
+    echo "Error: No map rdb file is specified. At least one of -thermal_map, -composite_map and -power_map should be specified."
+    echo "$usage"
+    exit 1
+fi    
+
+# checking of files
+function check_file {
+    if [ ! -f $1 ]; then
+        echo "Error: File $1 does not exist."
+        exit 1    
+    fi 
+    if [ ! -r $1 ]; then
+        echo "Error: File $1 is not readable."
+        exit 1
+    fi
+}
+#checking of thermal map file readability
+check_file $thermalMapFile
+
+#checking of power map file readability
+if [ -n "$powerMapFile" ]; then
+    check_file $powerMapFile
+fi
+
+#checking of composite file readability
+if  [ -n "$compositeMapFile" ]; then
+    check_file $compositeMapFile
+fi
+
+#checking of waveform file readability
+if  [ -n "$waveformFile" ]; then
+    check_file $waveformFile
+fi
+
+#checking of dir
+function check_dir_existance {
+    if [ ! -d $1 ]; then
+        echo "Error: Directory $1 does not exist."
+        exit 1
+    fi
+}
+function check_dir {
+    check_dir_existance $1
+    if [ ! -w $1 ]; then
+        echo "Error: Directory $1 is not writable."
+        exit 1
+    fi
+}
+
+if [ -z "$outputdir" ]; then
+    echo "Warning: No -output_dir is specified. Using current directory."
+    outputdir="./"
+fi
+if [ -n "$waveformFile" ]; then
+    if [ -z "$wdbdir" ]; then
+        echo "Warning: No -wdb_dir is specified. Using current directory."
+        wdbdir="./"
+    fi
+    check_dir_existance $wdbdir
+fi
+
+if [ -z "$databaseName" ]; then
+    databaseName="thermal_db"
+    echo "Warning: No -database_name is specified. Using \"$databaseName\"."
+fi
+
+#checking output directory for writing
+check_dir $outputdir
+
+tclFile=$outputdir/generateDfmdb.tcl
+rm -rf $tclFile
+
+echo "" >> $tclFile
+echo "source $MGC_HOME/pkgs/icv/pga/thermal_db_generator.tcl" >> $tclFile
+echo "" >> $tclFile
+
+nameArray=( thermalMapFile powerFile compositeFile waveform wdbDir database outputDir )
+valueArray=( "$thermalMapFile" "$powerMapFile" "$compositeMapFile" "$waveformFile" "$wdbdir" "$databaseName" "$outputdir" )
+    
+elemCount=${#nameArray[@]}
+
+for (( i=0;i<$elemCount;i++)); do
+    name=${nameArray[${i}]}
+    value=${valueArray[${i}]}
+    if [ -n "$value" ]; then
+        echo "set $name $value" >> $tclFile
+    else
+        echo "set $name \"\"" >> $tclFile
+    fi
+done 
+
+echo "set thermalDatabaseGenerator [::CThermalDatabaseGenerator::Create \$thermalMapFile \$powerFile \$compositeFile \$waveform \$wdbDir \$outputDir \$database]" >> $tclFile 
+echo "\$thermalDatabaseGenerator generateDatabase" >> $tclFile
+echo "::itcl::delete object \$thermalDatabaseGenerator" >> $tclFile
+echo "" >> $tclFile
+
+
+echo "MGC_HOME is $MGC_HOME"
+
+export CALIBRE_STATIC_PGA_ENABLE=91213
+
+eval $MGC_HOME/bin/calibre -ys -exec $tclFile
+
+if  [ -z $THERMAL_DBG_KEEP_DB_GEN_TCL_SCRIPT ]; then
+    rm -rf $tclFile
+fi
