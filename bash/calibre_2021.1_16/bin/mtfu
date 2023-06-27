@@ -1,0 +1,67 @@
+#!/bin/bash
+#************************************************************************CPY10*#
+#*   Copyright Mentor Graphics Corporation 2005-2019                     CPY11*#
+#*                    All Rights Reserved.                               CPY12*#
+#*                                                                       CPY13*#
+#*   THIS WORK CONTAINS TRADE SECRET AND PROPRIETARY INFORMATION         CPY14*#
+#*   WHICH IS THE PROPERTY OF MENTOR GRAPHICS CORPORATION OR ITS         CPY15*#
+#*   LICENSORS AND IS SUBJECT TO LICENSE TERMS.                          CPY16*#
+#************************************************************************CPY17*#
+
+py3=$MGC_HOME/bin/calpython3
+python_dir=$MGC_HOME/pkgs/icv/pvt/py
+MTFU_PATH=$python_dir/mtfu
+run_pye=$python_dir/enc_dec/run_pye.pyc
+
+# Set OMP_NUM_THREADS here, no longer done in calpython3
+export OMP_NUM_THREADS=1
+
+if [ $# -lt 1 ]; 
+    then arg1="--help"
+else
+    arg1=$1
+fi
+
+if [[ "$arg1" = "--test" || "$arg1" = "-t"  || "$arg1" = "--help" ||\
+      "$arg1" = "--model" || "$arg1" = "-m" || "$arg1" = "-h" ]]; 
+then 
+    #invoke the new MTFU
+    default_link="./default.ini"
+
+    if [ -L ${default_link} ] ; then
+        if [ -e ${default_link} ] ; then
+            rm -f ${default_link}
+            #echo "Info: Found default.ini file..."
+        else
+            #echo "Error: Broken link to default.ini file. Remove link and run again. Exiting..."
+            mv ${default_link} ${default_link}.bk
+        fi
+    elif [ -e ${default_link} ] ; then
+        #echo "Warning: Your default.ini file is a local copy and results maybe unpredictable." 
+        mv ${default_link} ${default_link}.bk
+    fi
+
+    #echo "Info: Creating link to default.ini"
+    ln -s $MTFU_PATH/default.ini .
+
+    mtfu_pye=$MTFU_PATH/mtfu.pye
+
+    $py3 $run_pye -file $mtfu_pye $@
+    failed=$?
+    rm -f ${default_link}
+    exit $failed
+fi
+
+if [[ "$arg1" = "--opcnet" || "$arg1" = "--model_train" || \
+      "$arg1" = "--model_test" || "$arg1" = "--data_prep" || \
+      "$arg1" = "--help" ]];
+then 
+    echo "Running the older version of MTFU..."; 
+    #invoke the OLD MTFU
+    mtfu_pye=$MTFU_PATH/mentor_tensorflow_utils.pye
+    $py3 $run_pye -file $mtfu_pye $@
+    failed=$?
+    exit $failed
+fi
+
+

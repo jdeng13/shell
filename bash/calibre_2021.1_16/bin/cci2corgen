@@ -1,0 +1,116 @@
+#!/bin/sh
+#*************************************************************************#
+#*   Copyright Mentor Graphics Corporation 2005  All Rights Reserved.    *#
+#*                                                                       *#
+#*   THIS WORK CONTAINS TRADE SECRET AND PROPRIETARY INFORMATION         *#
+#*   WHICH IS THE PROPERTY OF MENTOR GRAPHICS CORPORATION OR ITS         *#
+#*   LICENSORS AND IS SUBJECT TO LICENSE TERMS.                          *#
+#*************************************************************************#
+
+if test -z "$CALIBRE_HOME"
+then
+  # CALIBRE_HOME is not set, use MGC_HOME
+  CALIBRE_HOME="$MGC_HOME"
+else
+  if test -z "$MGC_HOME"
+  then
+    # MGC_HOME is not set, use CALIBRE_HOME
+    MGC_HOME="$CALIBRE_HOME"
+  else
+    if test "$MGC_HOME" = "$CALIBRE_HOME"
+    then
+      # both are set, but are the same -- no problem
+      :
+    else
+      # both are set, and are different
+      echo "WARNING: \$CALIBRE_HOME and \$MGC_HOME are different, using \$CALIBRE_HOME=$CALIBRE_HOME" >&2
+      MGC_HOME="$CALIBRE_HOME"
+    fi
+  fi
+fi
+
+export CALIBRE_HOME MGC_HOME
+
+if test -z "$MGC_HOME"
+then
+   echo "ERROR: Could not find Calibre software tree. Please set \$MGC_HOME or \$CALIBRE_HOME." >&2
+   exit 1
+fi
+MINUS_SIXTY_FOUR_SEEN=
+DEV_VCO=$VCO
+
+
+if test -z "$FDI_USE_FDI_ENV"
+then
+    FDI_ENV="$CALIBRE_HOME/bin/calibre_env"
+else
+    FDI_ENV="$CALIBRE_HOME/bin/fdi_env"
+fi
+
+FDI_UTIL="$CALIBRE_HOME/bin/fdi_util"
+SW_WKSTN=''  # dont do type check yet
+
+. $FDI_ENV
+. $FDI_UTIL
+
+
+#
+#sixtyfourSeen() will check whether -64 is in the switch or not!
+# we also set the RUNDIR_OPTION_SEEN flag here.
+#
+
+sixtyfourSeen()
+{
+for opt in $@; do
+    case "$opt" in
+          -64) MINUS_SIXTY_FOUR_SEEN=1
+              ;;
+    esac
+done
+}
+
+updateSwitch()
+{
+
+if [ ! -z "$MINUS_SIXTY_FOUR_SEEN" ]
+then
+   # 64 bit
+      switches=$@
+      switches=`echo "$switches" | sed -e 's/-64//'`
+fi
+
+}
+
+# backdoor setup for QA use only, acts same as -64 on command line
+if [ "$USE_CALIBRE_64" = "1" ]
+then
+   MINUS_SIXTY_FOUR_SEEN=1
+fi
+
+
+
+test -z "$MGC_VCO" && exit 1
+#The fdi_env script sets the MGC_VCO variable use it to set the VCO variable and export
+VCO=$MGC_VCO ; export VCO;
+
+# environment check, script issues any needed messages.
+switches="$* $FDI_CMD_LINE_ARGS"
+#echo "The command line arguments are" 
+#echo $switches;
+#echo "Done with the args";
+# call parseArgs function to parse arguments for their validity.
+
+# need to check for -64 in command line and also -RUNDIR option
+sixtyfourSeen $@
+
+#if needed then update the switch ( remove -64 from the switch)
+updateSwitch $@
+
+
+cci2corgen_cmd=$CALIBRE_HOME/pkgs/fdi/pvt/cci2corgen_64.mod
+
+if test ! -x $cci2corgen_cmd
+then
+	echo "ERROR: 64-bit cci2corgen not found. Aborting..." >&2
+fi
+exec $cci2corgen_cmd $switches

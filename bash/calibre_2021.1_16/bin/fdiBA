@@ -1,0 +1,187 @@
+#!/bin/sh
+#*************************************************************************#
+#*   Copyright Mentor Graphics Corporation 2005  All Rights Reserved.    *#
+#*                                                                       *#
+#*   THIS WORK CONTAINS TRADE SECRET AND PROPRIETARY INFORMATION         *#
+#*   WHICH IS THE PROPERTY OF MENTOR GRAPHICS CORPORATION OR ITS         *#
+#*   LICENSORS AND IS SUBJECT TO LICENSE TERMS.                          *#
+#*************************************************************************#
+
+if test -z "$CALIBRE_HOME"
+then
+    # CALIBRE_HOME is not set, use MGC_HOME
+    CALIBRE_HOME="$MGC_HOME"
+else
+    if test -z "$MGC_HOME"
+    then
+        # MGC_HOME is not set, use CALIBRE_HOME
+        MGC_HOME="$CALIBRE_HOME"
+    else
+        if test "$MGC_HOME" = "$CALIBRE_HOME"
+        then
+            # both are set, but are the same -- no problem
+            :
+        else
+            # both are set, and are different
+            echo "WARNING: \$CALIBRE_HOME and \$MGC_HOME are different, using \$CALIBRE_HOME=$CALIBRE_HOME" >&2
+            MGC_HOME="$CALIBRE_HOME"
+        fi
+    fi
+fi
+
+export CALIBRE_HOME MGC_HOME
+
+if test -z "$MGC_HOME"
+then
+    echo "ERROR: Could not find Calibre software tree. Please set \$MGC_HOME or \$CALIBRE_HOME." >&2
+    exit 1
+fi
+
+DEV_VCO=$VCO
+
+if test -z "$FDI_USE_FDI_ENV"
+then
+    FDI_ENV="$CALIBRE_HOME/bin/calibre_env"
+else 	
+    FDI_ENV="$CALIBRE_HOME/bin/fdi_env"
+fi	
+FDI_UTIL="$CALIBRE_HOME/bin/fdi_util"
+SW_WKSTN=''  # dont do type check yet
+
+#set the flag for ignoring OA_COMPILER
+ignore_oacompiler="1"
+if test '!' -z "$CALIBRE_FDI_USE_OA_CDBA_NAMESPACE"
+then                                         
+unset CALIBRE_FDI_USE_OA_CDBA_NAMESPACE        
+fi
+
+. $FDI_ENV
+. $FDI_UTIL
+
+test -z "$MGC_VCO" && exit 1
+#The fdi_env script sets the MGC_VCO variable use it to set the VCO variable and export
+VCO=$MGC_VCO ; export VCO;
+
+if [ "$VCO" = "iil" ] || [ "$VCO" = "ira" ]; then
+    echo "ERROR: fdiBA is not supported on this  platform" >& 2
+    exit 0
+fi
+
+# environment check, script issues any needed messages.
+switches="$* $FDI_CMD_LINE_ARGS"
+
+#call parseArgs function to parse arguments for their validity
+parse $switches
+
+PEXmode=0
+
+strm=0;
+
+for arg in $switches
+do
+    db_arg=`echo $arg |tr "[:lower:]" "[:upper:]"`
+    case $db_arg in
+        -GDS) strm=1;;
+        -OASIS) strm=1;;
+        OA)
+        if [ `echo $switches | grep -ci "\-calibreview" ` -gt 0 ]
+        then
+            PEXmode=1
+        fi
+        ;;
+    esac;
+done
+
+
+checkCdslibEnabled $switches
+if [ $cdslib_enabled == "1" ]
+then
+    libDefsFile=`cdslib2libdefs`
+    echo "INFO: cds.lib has been converted to lib.defs $libDefsFile"
+
+    if [ $PEXmode -ne 0 ]
+    then
+        switches="$switches -oaLibDefs $libDefsFile"
+    else
+        switches="$switches -libdefs $libDefsFile"
+    fi
+fi
+
+if [ $strm -ne 0 ]
+then
+    if [ $PEXmode -ne 0 ]
+    then
+        echo "ERROR: stream BA and PEX BA mode can't be enabled simultaneously"
+        exit 1
+    fi
+    fdiba_cmd="$CALIBRE_HOME/pkgs/fdi/pvt/strmBA.mod"
+    if [ "$PICK_64" = "1" ]; then
+        USE_CALIBRE_64=1; export USE_CALIBRE_64
+        fdiba_cmd="$CALIBRE_HOME/pkgs/fdi/pvt/strmBA_64.mod" 
+    fi
+    if test ! -x $fdiba_cmd
+    then
+        if [ "$PICK_64" = "1" ]; then
+            echo "ERROR: 64 bit strmBA not found. Strm based back annotation not supported. Aborting..." >&2
+            exit 0;
+        else
+            echo "ERROR: strmBA not found. Strm based back annotation not supported. Aborting..." >&2
+            exit 0;
+        fi
+    fi
+    color_mode="" 
+    if [ "$fdiba_color" -eq "1" ]
+    then
+        color_mode=" color"
+    fi
+    echo "RUNNING strm based$color_mode back-annotation..."
+    exec $FDI_INSTRUMENT_EXEC $fdiba_cmd $switches
+else
+
+    if [ $PEXmode -ne 0 ]
+    then
+        fdiba_cmd=$CALIBRE_HOME/pkgs/fdi/pvt/pexBA_$oa_version
+        if test ! -x $fdiba_cmd
+        then
+            echo "ERROR: pexBA not found, PEX back annotation not supported. Aborting..."
+            exit 0;
+        fi
+        echo "RUNNING PEX back-annotation..."
+        exec $FDI_INSTRUMENT_EXEC $fdiba_cmd $switches
+        exit $?
+
+    fi
+
+
+    fdiba_cal=$CALIBRE_HOME/bin/calibre
+    fdiba_calopt=" -ys -exec "
+    fdiba_ys=$CALIBRE_HOME/pkgs/fdi/tcl/BABackAnnotater.tcl
+
+    if test ! -x $fdiba_cal
+    then
+        echo "ERROR: Calibre not found. Calibre needed for running fdiBA. Aborting..." >&2
+        exit 0
+    fi
+
+    if test ! -x $fdiba_ys
+    then
+        echo "ERROR: ys_ba.tcl not found. Aborting..." >&2
+        exit 0
+    fi
+
+    fdiba_cmd="${fdiba_cal}${fdiba_calopt}${fdiba_ys}"
+
+    if [ "$PICK_64" = "0" ]; then
+        fdiba_cmd="${fdiba_cal} -32${fdiba_calopt}${fdiba_ys}"
+    fi
+    if [ "$PICK_64" = "1" ]; then
+        fdiba_cmd="${fdiba_cal} -64${fdiba_calopt}${fdiba_ys}"
+    fi
+
+    if [ "$PICK_64" = "1" ]; then
+        USE_CALIBRE_64=1; export USE_CALIBRE_64
+    fi
+
+    export FDI_USE_OA_LIBS
+    exec $FDI_INSTRUMENT_EXEC $fdiba_cmd $switches;
+fi

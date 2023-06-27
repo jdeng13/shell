@@ -1,0 +1,2 @@
+#!/bin/sh
+exec $MGC_HOME/bin/tclsh $MGC_HOME/pkgs/icv_calcm/tcl/calibre_dra.tcl "$@"

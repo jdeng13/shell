@@ -1,0 +1,44 @@
+#!/bin/sh
+
+cat <<!text!
+
+This script, utility, or interface file is now provided via the "Calibre
+Utilities, Examples, Scripts and Interface Software" download page:
+  http://supportnet.mentor.com/downloads/related/calibre_utilities/index.cfm
+
+Use of Calibre Utilities, Examples, Scripts, and Interface Software is
+subject to the following terms and conditions.
+
+
+              Copyright Mentor Graphics Corporation 2010
+                         All Rights Reserved.
+     THIS WORK CONTAINS TRADE SECRET AND PROPRIETARY INFORMATION
+        WHICH IS THE PROPERTY OF MENTOR GRAPHICS CORPORATION
+          OR ITS LICENSORS AND IS SUBJECT TO LICENSE TERMS.
+
+
+     This software is in pre-production form and is considered to be
+     beta code that is subject to the terms of the current Mentor
+     Graphics End-User License Agreement or your signed agreement
+     with Mentor Graphics that contains beta terms, whichever applies.
+
+     SVRF/TVF Technology
+     This file includes SVRF/TVF Technology under license by Mentor
+     Graphics Corporation. "SVRF/TVF Technology" shall mean Mentor
+     Graphics' Standard Verification Rule Format ("SVRF") and Tcl
+     Verification Format ("TVF ") proprietary syntaxes for expressing
+     process rules. You shall not use SVRF/TVF Technology unless you
+     are a Mentor Graphics customer as defined by having authorized
+     access to Mentor Graphics' password protected support site at
+     http://supportnet.mentor.com/. The exact terms of your obligations
+     and rights are governed by your respective license. You shall not
+     use SVRF/TVF Technology except: (a) for your internal business
+     purposes and (b) for use with Mentor Graphics' Calibre(r) tools.
+     All SVRF/TVF Technology constitutes or contains trade secrets and
+     confidential information of Mentor Graphics or its licensors. You
+     shall not make SVRF/TVF Technology available in any form to any
+     person other than your employees and on-site contractors, excluding
+     Mentor Graphics competitors, whose job performance requires access
+     and who are under obligations of confidentiality.
+
+!text!

@@ -1,0 +1,21 @@
+#! /bin/sh
+#\
+exec $MGC_HOME/pkgs/icv_comp/bin/tclsh "$0" "$@"
+set output ""
+# the line command option "-system" in the "-flat" case is ignored
+if {[catch { set output [eval exec $env(MGC_HOME)/bin/rdb2oasis -flat -system oas $argv] } result]} {
+    # Trimming the error message and printing it
+    set error_message ""
+    if {[string match "*The legal command line*" $result]} {
+        set error_message [string range $result [expr {[string first "rdb2oasis Error" $result]+10}] [expr {[string first "The legal command" $result] -2}]]
+    } else {
+        set error_message [string range $result [expr {[string first "rdb2oasis Error" $result]+10}] end-1]
+    }
+    puts "rdb_flattener $error_message"
+    puts "The legal command line:"
+    puts -nonewline "\trdb_flattener -rdb <input_RDB_file> -layout <input_layout_file> -o <output_RDB_file> "
+    puts "\[-layout_topcell | -rdb_topcell | \[-topcell  <topcell_name_to_flatten>\]\]"
+} else {
+    # Trimming rdb2oasis banner from the output message 
+    puts [string range $output [expr {[string last // $output] + 4 }] end]
+}

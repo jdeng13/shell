@@ -1,0 +1,19 @@
+#!/bin/sh
+
+if [ -z "$MGC_HOME" ]; then
+   echo "ERROR: MGC_HOME is not set. Please set proper MGC_HOME to run this script."
+   exit 1
+fi
+
+if [ $# -eq 0 ]; then
+  $MGC_HOME/bin/calscope job import -h
+  exit 0
+fi
+
+if [[ "$*" == *database* ]]; then
+  exec $MGC_HOME/bin/calscope job import "$@"
+else
+  dbName=`pwd`/caldash_`date +%s`.sqlite
+  exec $MGC_HOME/bin/calscope job import "$@" "-database" $dbName
+fi
+

@@ -1,0 +1,127 @@
+#!/bin/sh
+#*************************************************************************#
+#*   Copyright Mentor Graphics Corporation 2005  All Rights Reserved.    *#
+#*                                                                       *#
+#*   THIS WORK CONTAINS TRADE SECRET AND PROPRIETARY INFORMATION         *#
+#*   WHICH IS THE PROPERTY OF MENTOR GRAPHICS CORPORATION OR ITS         *#
+#*   LICENSORS AND IS SUBJECT TO LICENSE TERMS.                          *#
+#*************************************************************************#
+
+# Disable the message about deprecated RHEL 5 operating system when -outFile option is not specified
+ans=`echo {$*} | grep -wi "\-outFile"`
+if [ -z "$ans" ]
+then
+    export SKIP_OS_CHECKS=1
+fi
+
+# Print the command line with arguments to stderr if corresponding var is set
+if [ -n "$FDI_DEBUG_PRINT_CMD" ]
+then
+    echo "FDI Command execution:" >&2
+    echo "$0 $@" >&2
+    if [ -n "$MGC_CALIBRE_DB_READ_OPTIONS" ]
+    then
+        echo "MGC_CALIBRE_DB_READ_OPTIONS: \"$MGC_CALIBRE_DB_READ_OPTIONS\"" >&2
+    fi
+fi
+
+if test -z "$CALIBRE_HOME"
+then
+  # CALIBRE_HOME is not set, use MGC_HOME
+  CALIBRE_HOME="$MGC_HOME"
+else
+  if test -z "$MGC_HOME"
+  then
+    # MGC_HOME is not set, use CALIBRE_HOME
+    MGC_HOME="$CALIBRE_HOME"
+  else
+    if test "$MGC_HOME" = "$CALIBRE_HOME"
+    then
+      # both are set, but are the same -- no problem
+      :
+    else
+      # both are set, and are different
+      echo "WARNING: \$CALIBRE_HOME and \$MGC_HOME are different, using \$CALIBRE_HOME=$CALIBRE_HOME" >&2
+      MGC_HOME="$CALIBRE_HOME"
+    fi
+  fi
+fi
+
+export CALIBRE_HOME MGC_HOME
+
+if test -z "$MGC_HOME"
+then
+   echo "ERROR: Could not find Calibre software tree. Please set \$MGC_HOME or \$CALIBRE_HOME." >&2
+   exit 1
+fi
+
+DEV_VCO=$VCO
+
+if test -z "$FDI_USE_FDI_ENV"
+then
+	FDI_ENV="$CALIBRE_HOME/bin/calibre_env"
+else 	
+	FDI_ENV="$CALIBRE_HOME/bin/fdi_env"
+fi	
+FDI_UTIL="$CALIBRE_HOME/bin/fdi_util"
+SW_WKSTN=''  # dont do type check yet
+
+#set the flag for ignoring OA_COMPILER
+ignore_oacompiler="1"
+#set the flag for using stl4 compiled version on solaris
+stl4_enable="0"
+. $FDI_ENV
+. $FDI_UTIL
+
+test -z "$MGC_VCO" && exit 1
+#The fdi_env script sets the MGC_VCO variable use it to set the VCO variable and export
+VCO=$MGC_VCO ; export VCO;
+
+# environment check, script issues any needed messages.
+switches="$* $FDI_CMD_LINE_ARGS"
+#echo "The command line arguments are" 
+#echo $switches;
+
+#call parseArgs function to parse arguments for their validity
+parse $switches
+checkFastLefdefDisabled $switches
+
+if [ "$fastlefdef_disabled" = "1" ]; then
+	switches="$switches -outformat OASIS"
+	fdi2oasis_cmd=$CALIBRE_HOME/pkgs/fdi/pvt/pnr2strm.mod
+else
+	fdi2oasis_cmd=$CALIBRE_HOME/pkgs/fdi/pvt/fdi2oasis.mod
+fi
+
+
+if [ "$PICK_64" = "1" ]; then
+	if [ "$fastlefdef_disabled" = "1" ]; then
+		fdi2oasis_cmd=$CALIBRE_HOME/pkgs/fdi/pvt/pnr2strm_64.mod
+	else
+		fdi2oasis_cmd=$CALIBRE_HOME/pkgs/fdi/pvt/fdi2oasis_64.mod
+		if [ "$stl4_enable" = "1" ]; then
+			fdi2oasis_cmd=$CALIBRE_HOME/pkgs/fdi/pvt/fdi2oasis_stlport_64.mod
+		fi
+	fi
+fi
+
+if test ! -x $fdi2oasis_cmd
+then
+	if [ "$PICK_64" = "1" ]; then
+	echo "ERROR: 64-bit fdi2oasis not found. Aborting..." >&2
+	exit 0
+	else
+	echo "ERROR: 32-bit fdi2oasis not found. Aborting..." >&2
+	exit 0
+	fi
+fi
+
+checkCdslibEnabled $switches
+if [ $cdslib_enabled == "1" ]
+then
+    libDefsFile=`cdslib2libdefs`
+    switches="$switches -libdefs $libDefsFile"
+    echo "INFO: cds.lib has been converted to lib.defs $libDefsFile"
+fi
+
+exec $FDI_INSTRUMENT_EXEC $fdi2oasis_cmd $switches

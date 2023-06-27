@@ -1,0 +1,57 @@
+#!/bin/bash
+#************************************************************************CPY10*#
+#*   Copyright Mentor Graphics Corporation 2005-2019                     CPY11*#
+#*                    All Rights Reserved.                               CPY12*#
+#*                                                                       CPY13*#
+#*   THIS WORK CONTAINS TRADE SECRET AND PROPRIETARY INFORMATION         CPY14*#
+#*   WHICH IS THE PROPERTY OF MENTOR GRAPHICS CORPORATION OR ITS         CPY15*#
+#*   LICENSORS AND IS SUBJECT TO LICENSE TERMS.                          CPY16*#
+#************************************************************************CPY17*#
+
+py3=$MGC_HOME/bin/calpython3
+python_dir=$MGC_HOME/pkgs/icv/pvt/py
+run_pye=$python_dir/enc_dec/run_pye.pyc
+
+if [ $# -lt 1 ]; 
+    then arg1="--help"
+else
+    arg1=$1
+fi
+
+backup_file () {
+    filepath=$1
+    if [ -L ${filepath} ] ; then
+        if [ -e ${filepath} ] ; then
+            rm -f ${filepath}
+            #echo "Info: Found default.ini file..."
+        else
+            #echo "Error: Broken link to default.ini file. Remove link and run again. Exiting..."
+            mv ${filepath} ${filepath}.bk
+        fi
+    elif [ -e ${filepath} ] ; then
+        #echo "Warning: Your default.ini file is a local copy and results maybe unpredictable." 
+        mv ${filepath} ${filepath}.bk
+    fi
+}
+
+#invoke the new MTFU
+default_search_link="./default_search.ini"
+default_link="./default.ini"
+backup_file $default_search_link
+backup_file $default_link
+
+#echo "Info: Creating link to default_search.ini"
+ln -s $python_dir/mtfu_search/default_search.ini .
+
+#echo "Info: Creating link to default.ini"
+ln -s $python_dir/mtfu/default.ini .
+
+mtfu_search_pye=$python_dir/mtfu_search/mtfu_search.pye
+$py3 $run_pye -file $mtfu_search_pye $@
+failed=$?
+rm -f ${default_link}
+rm -f ${default_search_link}
+exit $failed
+
+
+

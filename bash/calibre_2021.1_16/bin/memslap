@@ -1,0 +1,197 @@
+#!/bin/sh
+#************************************************************************CPY10*#
+#*   Copyright Mentor Graphics Corporation 2005-2020                     CPY11*#
+#*                    All Rights Reserved.                               CPY12*#
+#*                                                                       CPY13*#
+#*   THIS WORK CONTAINS TRADE SECRET AND PROPRIETARY INFORMATION         CPY14*#
+#*   WHICH IS THE PROPERTY OF MENTOR GRAPHICS CORPORATION OR ITS         CPY15*#
+#*   LICENSORS AND IS SUBJECT TO LICENSE TERMS.                          CPY16*#
+#************************************************************************CPY17*#
+#    Optional input environment variables:                                     #
+#      CALIBRE_CMD_LINE_ARGS -- additional arguments to append to the cmd line #
+#                                                                              #
+#    The wrapper script is used for most customer visible binaries.            #
+#    Note there is a separate wrapper for calibrewb/calibre.                   #
+#    The wrapper:                                                              #
+#      -- ensures MGC_HOME is set appropriately                                #
+#      -- source calibre_env to check the environment and                      #
+#         set required environment vars                                        #
+#         the wrapper script should avoid checking/setting env vars directly   #
+#      -- sets the library search path appropriately                           #
+#      -- adjusts the invocation by removing '-32' or '-64' if present         #
+#      -- execs the binary from the specified location                         #
+#                                                                              #
+#    Usage Instructions                                                        #
+#    ==================                                                        #
+#    Export both the binary and the wrapper in ic/lv/src/glue/exports.         #
+#    Typical usage:                                                            #
+#      #ifdef $(lcl_exec) || $(exec) || $(all)                                 #
+#      yourbuildbir/yourapp    $(ICV)/pvt/yourapp  $(EXE)                      #
+#      userware/utils-wrapper  $(ICV)/bin/yourapp  $(EXE)                      #
+#      #endif ; $(lcl_exec) || $(exec) || $(all)                               #
+#                                                                              #
+#    If the exports were placed in $(ICV)/pvt and $(ICV)/bin, respectively,    #
+#    then this script does not need to be modified. If the files were placed   #
+#    anywhere else, then add an entry to the case statement below.             #
+#    Typical usage:                                                            #
+#       yourapp)  pkg=your-package ;;                                          #
+#                                                                              #
+################################################################################
+
+test -n "$CALIBRE_SHOW_INVOCATION" \
+    && echo "## Initial invocation: $0 $@" >&2
+
+progname=`basename $0`
+
+if test ! -x $CALIBRE_HOME/bin/calibre_env
+then
+  if test -x $MGC_HOME/bin/calibre_env
+  then
+    CALIBRE_HOME=$MGC_HOME
+  else
+    # Try to form canonical path to look for MGC_HOME based on where script
+    # was invoked. Note that in this script, it does not matter whether
+    # MGC_HOME is the "right" VCO or not, as both this script and calibre_env
+    # are platform independent and can be executed out of any tree.
+    localdir=`/bin/pwd`
+    dotdir='^\.$'
+    testdir=`dirname $0 \
+        | sed -e "s!$dotdir!$localdir!" -e 's!/shared/pkgs/.*!!' \
+              -e 's!/pkgs/.*!!' -e 's!/bin/*$!!'`
+    testloc="$testdir/bin/calibre_env"
+    if test -x "$testloc"
+    then
+      CALIBRE_HOME=$testdir
+      # jam at front of PATH, just in case
+      PATH=$CALIBRE_HOME/bin:$PATH
+      export PATH
+      # MGC_HOME never set for rmemcached, so dont warn about it
+      test -z "$CALIBRE_SKIP_OS_CHECKS" -a "$progname" != "rmemcached" \
+          && echo "WARNING: Software tree location not set or invalid," \
+                  "using \$MGC_HOME=$CALIBRE_HOME"
+    else
+      echo "ERROR: Invalid software tree," \
+           "could not find \$MGC_HOME/bin/calibre_env." >&2
+      exit 1
+    fi
+  fi
+fi
+MGC_HOME="$CALIBRE_HOME"
+export MGC_HOME CALIBRE_HOME
+. $MGC_HOME/bin/calibre_env
+# make doubly sure any tmp files created by calibre_env are deleted
+test -n "$MGC_TMPDIR" && rm -rf $MGC_TMPDIR/.$$*
+# calibre_env already output any error messages, just exit if MGC_VCO null
+test -z "$MGC_VCO" && exit 1
+
+# LD_LIBRARY_PATH is normally cleared before the Calibre libraries are
+# added, so their is no need to check for conflicting libraries
+CALIBRE_SKIP_DYNAMIC_LIBRARY_CHECK=1
+export CALIBRE_SKIP_DYNAMIC_LIBRARY_CHECK
+if test -z "$CALIBRE_USE_LIBRARY_PATH" -a "$progname" != "Mgcvcmp"
+then
+  # clear to avoid any strange library versions
+  unset LD_LIBRARY_PATH
+fi
+# set LD_LIBRARY_PATH to pick up any required shared libraries
+. $MGC_HOME/pkgs/icv/pvt/set_shared_library_path
+
+# execute startup(s) (if any) in the MGC_HOME tree, followed user startup(s)
+if test -z "$SKIP_CALIBRERC"
+then
+  for dir in $MGC_HOME/etc/cust/startup/calibrerc $HOME/.calibrerc
+  do
+    test -r $dir/global && . $dir/global
+    test -r $dir/$progname && . $dir/$progname
+  done
+fi
+
+# default location for binary is $MGC_HOME/pkgs/icv/pvt
+where=$MGC_HOME/pkgs ; pkg=icv ; dir=pvt
+case "$progname" in
+# inhouse apps, not released
+  clm_test|ledit_sim|hold_licenses)       pkg=icv_inhouse ;;
+  lm_handshake_server_sim)                pkg=icv_inhouse ;;
+  model_view)                             pkg=icv_pmview_inhouse ;;
+  ldbview)                                pkg=icwb_inhouse ;;
+  pdbview)                                pkg=icv_inhouse ;;
+  cal_svc)                                pkg=icv_services_inhouse ;;
+# released apps located in pkgs (other than icv/pvt)
+  gfc|dispatcher|stackviewer|xcalibrate)  pkg=icxc ;;
+  pga_calcd|pga_solver)                   dir=pga ;;
+  calibrepm)                              pkg=icwb ;;
+  everest|calibrexact)                    pkg=everest ; progname=calibrexact ;;
+  calibrexactd)                           pkg=everest ; progname=calibrexactd ;;
+  calcmd)                                 pkg=icv_calcm ;;
+  calscopetcl)                            pkg=icv_calcm ; dir=calscope ;;
+  fstools|pexrc|fs2pex|autotuner)         pkg=icv_pextra ;;
+  capse|raph2fs3|xactview)                pkg=icv_pextra ;;
+  mem*)                                   pkg=icv_memcached ;;
+  rmemcached)                             pkg=icv_memcached ; progname=memcached ;;
+  calpython3|python3)                     pkg=icv_python ; dir=asp/bin ; progname=python3
+                                          ;;
+# released apps located in shared/pkgs
+  vddrc_annotate_oa|waiver_manager_oa)    where=$MGC_HOME/shared/pkgs
+                                          dir=tools/calibre_client/pvt ;;
+  utils-wrapper*)                         where='' ; pkg='' ;  # internal test use only
+                                          dir=`dirname $CALIBRE_WRAPPER_TEST_PGM`
+                                          progname=`basename $CALIBRE_WRAPPER_TEST_PGM` ;;
+# icv/pvt is the default for all else
+  *)  ;; 
+esac
+
+progname_dir="$where/$pkg/$dir"
+if test ! -d "$progname_dir" -o ! -r "$progname_dir"
+then
+  echo "ERROR: Could not find or read directory: $progname_dir" >&2
+  exit 1
+fi
+
+fullpath="$progname_dir/$progname"
+if test ! -x "$fullpath"
+then
+  echo "ERROR: Could not invoke $progname_dir/$progname " >&2
+  exit 1
+fi
+test -n "$CALIBRE_ENGR_PRELUDE" \
+    && fullpath="$CALIBRE_ENGR_PRELUDE $fullpath"
+
+# application path is complete, now process the arguments
+
+args=''
+for arg in "$@" $CALIBRE_CMD_LINE_ARGS
+do
+  wex=''
+  if test "x$arg" = "x-32" -o "x$arg" = "x-64"
+  then
+    : # strip out any obsolete -32/-64 switches
+  else
+    # is wildcard expansion possibly needed?
+    if echo "$arg" | egrep -q '\?|\*|\[|\]'
+    then
+      # try letting ls expand the argument
+      ls >/dev/null 2>&1 -d $arg && wex=1
+    fi
+    if echo "$arg" | grep -q '\$'
+    then
+      # literal dollar sign
+      # add extra escape to get the dollar sign through the eval exec below
+      arg=`echo "$arg" | sed -e 's/\\$/\\\\$/g'`
+    fi
+    # avoid eval when not needed as it loses arguments such as '<>' or '>=80.0'
+    test -z "$wex" \
+        && earg="$arg" \
+        || earg="`eval echo "$arg"`"   # eval causes the wildcard expansion
+    # additional quoting around each arg needed to ensure specal
+    # characters preserved (e.g. embedded spaces)
+    test -z "$args" \
+        && args="\"$earg\"" \
+        || eval args="'$args \"$earg\"'"
+  fi
+done
+
+test -n "$CALIBRE_SHOW_INVOCATION" \
+    && echo "## Invocation after processing: $fullpath $args" >&2
+
+test -z "$CALIBRE_PREPROCESS_ONLY" \
+    && eval exec $fullpath $args

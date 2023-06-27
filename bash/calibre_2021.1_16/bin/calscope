@@ -1,0 +1,47 @@
+#!/bin/sh
+#************************************************************************CPY10*#
+#*   Copyright Mentor Graphics Corporation 1996-2019                     CPY11*#
+#*                      All Rights Reserved.                             CPY12*#
+#*                                                                       CPY13*#
+#*   THIS WORK CONTAINS TRADE SECRET AND PROPRIETARY INFORMATION         CPY14*#
+#*   WHICH IS THE PROPERTY OF MENTOR GRAPHICS CORPORATION OR ITS         CPY15*#
+#*   LICENSORS AND IS SUBJECT TO LICENSE TERMS.                          CPY16*#
+#*                                                                       CPY17*#
+#*   This software is in pre-production form and is considered to be     CPY18*#
+#*   beta code that is subject to the terms of the current Mentor        CPY19*#
+#*   Graphics End-User License Agreement or your signed agreement        CPY20*#
+#*   with Mentor Graphics that contains beta terms, whichever applies.   CPY21*#
+#************************************************************************CPY22*#
+version="1.0"
+
+# set to 1 to print out the debug messages
+DEBUG=0
+
+# Output message for debugging purpose
+debug() {
+   if [ $DEBUG == 1 ]; then
+      echo "DEBUG: $1"
+   fi
+}
+
+# Set VCO
+VCO=`$MGC_HOME/bin/calibre_vco`
+
+# Set Python Home
+PYTHON=$MGC_HOME/bin/calpython3
+
+if [ ! -f $PYTHON ]; then
+   echo "ERROR: Python is not found in your MGC_HOME: $PYTHON"
+   echo "Please use Calibre version 2019.1 or later"
+   exit 1
+fi
+
+# Print virables
+debug "MGC_HOME    : $MGC_HOME"
+debug "PYTHON      : $PYTHON"
+debug "EXEC HOST   : `hostname`"
+debug "WORK DIR    : `pwd`"
+debug "VCO         : $VCO"
+
+exec $PYTHON $MGC_HOME/pkgs/icv_calcm/calscope/calscope.py "$@"
+

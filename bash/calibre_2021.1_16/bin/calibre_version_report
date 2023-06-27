@@ -1,0 +1,65 @@
+#!/bin/sh
+#************************************************************************CPY11*#
+#*   Copyright Mentor Graphics Corporation 2010  All Rights Reserved.    CPY12*#
+#*                                                                       CPY13*#
+#*   THIS WORK CONTAINS TRADE SECRET AND PROPRIETARY INFORMATION         CPY14*#
+#*   WHICH IS THE PROPERTY OF MENTOR GRAPHICS CORPORATION OR ITS         CPY15*#
+#*   LICENSORS AND IS SUBJECT TO LICENSE TERMS.                          CPY16*#
+#************************************************************************CPY17*#
+#
+# This script will report the calibre version banner from MGC_HOME tree(s).
+#
+PATH="$PATH:/bin:/usr/bin"; export PATH
+
+if [ -z "$1" -o "x$1" = "x-h" -o "x$1" = "x-help" ] ; then
+  echo "Usage: $0 [-h] [-v] /path/to/MGC/releases ..." >&2
+  exit 1
+fi
+
+if [ "x$1" = "x-v" ] ; then
+  BE_VERBOSE="yes"
+  shift
+fi
+
+# Script function to process a single MGC_HOME tree
+processtree() {
+  echo "$d/$tree : " | tr -d "\012"
+  binary=""
+  if [ -s "$d/$tree/pkgs/icv/pvt/calibre" ] ; then
+     binary="$d/$tree/pkgs/icv/pvt/calibre"
+  elif [ -s "$d/$tree/pkgs/icv/bin/calibre" ] ; then
+     binary="$d/$tree/pkgs/icv/bin/calibre" # fallback for irl
+  fi
+  found=""
+  if [ -n "$binary" ] ; then
+     strings -a $binary | \
+     grep '^v[12][0-9][0-9][0-9]\.[0-9][0-9]*_[0-9][0-9]*\.[0-9][0-9]*.* '
+     found=$?
+  fi
+  if [ -z "$binary" ] ; then
+    echo "No calibre binary found"
+  elif [ $found -ne 0 ] ; then
+    echo "No version string found in $binary"
+  fi
+}
+
+# Main() - Call processtree() on each MGC_HOME tree
+for d in $* ;do
+  ( if [ -d "$d" -a -x "$d" ] ; then
+    cd $d;
+    for tree in * ; do 
+      if [ -d "$tree" ] ; then
+        case "x$tree" in
+          xdocs_cal_[12][0-9][0-9][0-9]\.*) ;; # Skip documentation trees
+          x???_cal_[12][0-9][0-9][0-9]\.*) processtree;;
+          *) test -n "$BE_VERBOSE" && echo "Skipping unknown directory $tree";;
+        esac;
+      fi;
+    done;
+    echo "";
+    fi
+  )
+done
+
+exit 0
+#eof

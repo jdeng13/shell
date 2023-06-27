@@ -1,0 +1,280 @@
+#!/bin/sh
+#************************************************************************CPY11*#
+#*   Copyright Mentor Graphics Corporation 2005  All Rights Reserved.    CPY12*#
+#*                                                                       CPY13*#
+#*   THIS WORK CONTAINS TRADE SECRET AND PROPRIETARY INFORMATION         CPY14*#
+#*   WHICH IS THE PROPERTY OF MENTOR GRAPHICS CORPORATION OR ITS         CPY15*#
+#*   LICENSORS AND IS SUBJECT TO LICENSE TERMS.                          CPY16*#
+#************************************************************************CPY17*#
+#
+#
+# IMPORTANT NOTICE: This script may make reference to environments that
+# are obsolete, experimental, under consideration, or simply reserved for
+# *possible* future usage. Reference to or recognition of an environment
+# by this script does not imply any support, current or future, by Mentor
+# Graphics Corporation.
+#
+# For information on environments supported by Calibre products, please see:
+#   http://www.mentor.com/dsm/customer/release/cal_os_config.html
+###############################################################################
+#
+# Input environment variables:
+#   CALIBRE_IPF_PRCTL_VALUE -- if "skip", then dont use prctl; set prctl to
+#                              any other non-null value 
+#   USE_CALIBRE_32 -- if set, normalize to "1" or ""
+#   USE_CALIBRE_64/USE_CALIBREWB_64 -- normalize USE_CALIBRE_64 to "1" or ""
+#   USE_CALIBRE_VCO -- if set, forces output VCO to $VCO
+#     VCO -- used only if above is set, value to force MGC_VCO to
+#   SKIP_OS_CHECKS -- if set, most OS warnings/errors/checks are skipped
+#     (some really ugly ones like HP-UX 10.20 are still done)
+#   SW_WKSTN -- if set, value is validated again current execution environment
+#               value to use can be obtained via "calibre_vco -wkstn"
+#   SKIP_THREAD_WORKAROUND -- if set, LD_ASSUME_KERNEL not set (Linux only)
+#   SKIP_PRELOAD_WORKAROUND -- if set, MADV not set (Solaris 9 and later only)
+#
+# Usage:
+#   calibre_vco          ## must not be sourced
+#     Output: VCO suitable for the current environment
+#             If none, null string is returned with exit 1
+#
+#   calibre_vco -wkstn  ## must not be sourced
+#     Output: human readable description of the current environment
+#             If none, null string is returned with exit 1
+#
+#   . calibre_env       ## must be sourced
+#     Output: None; warnings and errors written to <stderr>
+#     Following environment variables are set:
+#       CALIBRE_DISABLE_MT_INJECTION -- set if $LITHO_CHECKPOINT_PATH
+#       CALIBRE_32BIT_CAPABLE -- set if current environment 32-bit capable
+#       CALIBRE_64BIT_CAPABLE -- set if current environment 64-bit capable
+#       CALIBRE_PREFERED_WIDTH -- set to preferred default width
+#       CALIBRE_IPF_PRCTL -- set to prctl cmd to use on IPF (only)
+#       MGC_LANG -- set to "En_na"
+#       MGC_VCO  -- VCO for the current environment
+#       MGC_WKSTN -- human readable description of the current environment
+#       PING, RSH, UNAME, REBOOT, IFCONFIG, XTERM, XSET -- tool pathnames
+#
+#     In addition, the following system-dependent environment variables
+#     that are required for successful execution of Calibre products are set
+#       AIXTHREAD_MNRATIO=1:1       ## AIX only
+#       AIXTHREAD_SLPRATIO=1:1      ## AIX only
+#       AIXTHREAD_SCOPE=S           ## AIX only
+#       PTHREAD_DISABLE_HANDOFF=1   ## HP-UX only
+#       _M_SBA_OPTS=64:100:8        ## HP-UX only, iff not already set
+#       LD_ASSUME_KERNEL=2.4.19     ## Linux only, iff $SKIP_THREAD_WORKAROUND=''
+#       MADV=access_many            ## Solaris 9/10 only, iff $SKIP_PRELOAD_WORKAROUND=''
+#       LD_PRELOAD=madv.so.1        ## Solaris 9/10 only, iff $SKIP_PRELOAD_WORKAROUND=''
+#
+#   VCO values:
+#     hiw -- reserved (authorized use only)
+#     hpu -- HP PA-RISC, HP-UX versions 11.0 and 11i
+#     iil -- Intel Itanium, RHEL 3 and 4
+#     ira -- reserved (authorized use only)
+#     ixl -- Intel x86, RHEL 3 and 4
+#     so5 -- reserved (authorized use only)
+#     ss5 -- SUN UltraSparc, Solaris 8, 9 and 10
+#     
+# see $MGC_HOME/bin/calibre for a typical usage scenario for this script.
+###############################################################################
+# test "$DAVER_DEBUG" = "xv" && set -xv
+# test "$DAVER_DEBUG" = "deltas" && env | sort -u >/tmp/.$$env.start
+
+progname=`basename $0`
+
+# DR 301219
+# if test ! -z "$LITHO_CHECKPOINT_PATH"
+# then
+#   CALIBRE_DISABLE_MT_INJECTION=1 ; export CALIBRE_DISABLE_MT_INJECTION
+# fi
+
+generic_linux_warning="WARNING: This version of Linux is not qualified for use with this product."
+# default language to English if not set
+test -z "$MGC_LANG" && MGC_LANG=En_na ; export MGC_LANG
+MGC_VCO="???" ; export MGC_VCO
+# default is 64-bit capable
+CALIBRE_64BIT_CAPABLE=1 ; export CALIBRE_64BIT_CAPABLE
+# default is 32-bit capable
+CALIBRE_32BIT_CAPABLE=1 ; export CALIBRE_32BIT_CAPABLE
+# CALIBRE_IPF_PRCTL="" ; export CALIBRE_IPF_PRCTL
+
+# normalize values for env vars which may be set by users
+for var in USE_CALIBRE_32 USE_CALIBRE_64 USE_CALIBREWB_64 \
+           SKIP_OS_CHECKS CALIBRE_SKIP_OS_CHECKS SKIP_CALIBRERC
+do
+  value=`eval echo \\$$var`
+  case "$value" in
+    1*|[yY]*|[tT]*)     newvalue=1   ## 1, YES, TRUE ==> 1
+    ;;
+    0*|[nN]*|[fF]*|"")  newvalue=''  ## 0, NO, FALSE, "" ==> ""
+    ;;
+    *)  echo "WARNING: Invalid value $var=$value, assuming $var=TRUE." >&2
+        newvalue=1
+    ;;
+  esac
+  test "$value" = "$newvalue" || eval "$var=$newvalue ; export $var"
+done
+
+# SKIP_OS_CHECKS is deprecated in favor of CALIBRE_SKIP_OS_CHECKS
+if test -n "$CALIBRE_SKIP_OS_CHECKS$SKIP_OS_CHECKS"
+then
+  # at least one is set, make sure both are set
+  CALIBRE_SKIP_OS_CHECKS=1
+  export CALIBRE_SKIP_OS_CHECKS
+  SKIP_OS_CHECKS=1
+fi
+
+
+# USE_CALIBREWB_64 is deprecated, set USE_CALIBRE_64 instead
+if test "$USE_CALIBREWB_64" = 1
+then
+   USE_CALIBRE_64=1 ; export USE_CALIBRE_64
+fi
+
+# Set default location for some shell commands
+for prog in REMSH RSH PING UNAME REBOOT IFCONFIG XTERM XSET
+do
+  # init each var:  FOO=foo ; export FOO
+  eval "$prog=`echo $prog | tr '[A-Z]' '[a-z]'` ; export $prog"
+  founddir=''
+  # look through all the standard system directories
+  for dir in /usr/openwin/bin /usr/bin/X11 /etc /sbin /usr/sbin /bin /usr/bin
+  do
+    eval "test -x $dir/\$$prog && founddir=$dir"
+  done
+  # if found, set var: FOO=<location>/foo ; if not found, get rid of the var"
+  test -d "$founddir" && eval "$prog=$founddir/\$$prog" || eval "unset $prog"
+done
+
+# if remsh exists, use it
+test -x "$REMSH" && RSH=$REMSH
+
+if test -x "$UNAME"
+then
+  unames=`$UNAME -s`
+  unamem=`$UNAME -m`
+  unamer=`$UNAME -r`
+  unamev=`$UNAME -v`
+else
+  echo "ERROR: Could not find 'uname' system utility" >&2
+  MGC_VCO=''
+  unames="UNKNOWN"
+  unamem="UNKNOWN"
+  unamer="UNKNOWN"
+  unamev="UNKNOWN"
+fi
+MGC_WKSTN="$unames"
+
+case "$unames" in
+  Linux)
+    # set environment variable to cause thread behavior to revert to pre-NTPL behavior
+    # should only matter if on RH9/RHEL3 or above
+    #if test -z "$SKIP_THREAD_WORKAROUND"
+    #then
+    #  LD_ASSUME_KERNEL=2.4.19 ; export LD_ASSUME_KERNEL
+    #fi
+    if test "$unamem" = "x86_64"
+      MGC_VCO="ixl"
+      MGC_WKSTN="$MGC_WKSTN x86"
+      test "$unamem" != "x86_64" && CALIBRE_64BIT_CAPABLE=''
+      if test -z "$SKIP_OS_CHECKS"
+      then
+        if test -r /etc/redhat-release
+        then
+          linux_ver=`cat /etc/redhat-release | sed -e "s/Red Hat.*elease *//" -e "s/ .*//"`
+          case $linux_ver in
+            3*|4*|5*|6*|7*|8.0)
+              # life is good
+              ;;
+            *)
+              echo "WARNING: Red Hat Linux Release $linux_ver is not qualified for use with Calibre products." >&2
+              ;;
+            esac
+        else
+           if egrep -i 'suse.*sles.* [19]0*|suse.*enterprise.* [19]0*' </etc/issue >/dev/null 2>&1
+           then
+          # SLES 9 or 10, life is fine
+           : 
+           else
+             if egrep -i 'suse.*sles.* [8]|suse.*enterprise.* [8]' </etc/issue >/dev/null 2>&1
+             then
+                # SLES 8, no longer supported
+                CALIBRE_MODERN_OS=0
+                test -z "$SKIP_OS_CHECKS" -a "$progname" != "calibre_vco" && echo $generic_linux_warning >&2
+                test -z "$SKIP_OS_CHECKS" -a "$progname" != "calibre_vco" && test -r /etc/issue && egrep -vi 'Kernel|^ *$' </etc/issue | sed -e "s/^/WARNING: /" >&2
+             else 
+               test -z "$SKIP_OS_CHECKS" -a "$progname" != "calibre_vco" && echo $generic_linux_warning >&2
+               test -z "$SKIP_OS_CHECKS" -a "$progname" != "calibre_vco" && test -r /etc/issue && egrep -vi 'Kernel|^ *$' </etc/issue | sed -e "s/^/WARNING: /" >&2
+             fi
+           fi
+
+        fi   
+      fi
+    fi
+    ;;
+  *)
+    if test "$MGC_VCO"="???"
+    then
+       echo "ERROR: Unknown system type: $unames" >&2
+       # no valid VCO to return
+       MGC_VCO=''
+       MGC_WKSTN=''
+    fi
+    ;;
+esac
+
+# if both 32-bit and 64-bit available, we default to 32-bit (for now)
+CALIBRE_PREFERRED_WIDTH=32 ; export CALIBRE_PREFERRED_WIDTH
+# following check is moot while preferred width is 32
+if test -z "$CALIBRE_64BIT_CAPABLE" -o "$CALIBRE_32BIT_CAPABLE$USE_CALIBRE_32" = '11'
+then
+  CALIBRE_PREFERRED_WIDTH=32;
+fi
+# 64-bit takes precedence if both specified
+if test -z "$CALIBRE_32BIT_CAPABLE" -o "$CALIBRE_64BIT_CAPABLE$USE_CALIBRE_64" = '11'
+then
+  CALIBRE_PREFERRED_WIDTH=64;
+fi  
+
+# see if user wants to force a particular value for buld/test purposes
+if test -z "$USE_CALIBRE_VCO"
+then
+  if test ! -z "$SW_WKSTN" -a ! -z "$MGC_VCO"
+  then
+    if test "$SW_WKSTN" != "$MGC_WKSTN"
+    then
+      echo "ERROR: Current execution environment is $MGC_WKSTN. Software tree is for environment $SW_WKSTN." >&2
+      # intended for internal users who have a good reason to override tree checks
+      # not supported for production usage!
+      test -z "$SKIP_OS_CHECKS" && MGC_VCO=''
+    fi
+  fi
+else
+  # make it so...
+  # use whatever VCO we've inherited from the environment
+  MGC_VCO="$VCO"
+fi
+
+# if test "$DAVER_DEBUG" = "deltas"
+# then
+#   env | sort -u >/tmp/.$$env.finish
+#   diff -w -C 0 /tmp/.$$env.start /tmp/.$$env.finish | egrep -v '\*\*\*|\-\-\-' | sed -e "s/^/## `$UNAME -n` /"
+#   rm -rf /tmp/.$$*
+# fi
+
+# if name indicates script was called directly (i.e., not sourced), output info ; otherwise, just return
+# calling script should check for MGC_VCO='', which indicates an error condition
+if echo "$progname" | egrep '_env|_vco' >/dev/null 2>&1
+then
+  # emulate behavior of old "get_mgc_vco" scripts by echoing the VCO as well
+  if test -z "$MGC_VCO"
+  then
+    exit 1
+  else
+    if test "x$1" = "x-wkstn"
+    then
+      echo "$MGC_WKSTN" 
+    else
+      echo "$MGC_VCO" 
+    fi
+  fi
+fi

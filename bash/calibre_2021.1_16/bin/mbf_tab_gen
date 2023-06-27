@@ -1,0 +1,123 @@
+#!/bin/sh
+function usage() {
+echo "Usage: mbf_tab_gen { <TSMC> <Output Directory> <Layers List> <Process File> <VCMP Library> <Technology Node> }"
+echo "       Example: > mbf_tab_gen TSMC TSMC_TABS \"M1 Mx My\" process.enc vcmp-lib N40LP"
+echo "       Example: > mbf_tab_gen TSMC NEW_TABS \"1 2 3\" process.enc vcmp-lib N45GS"
+echo "       mbf_tab_gen { <MGC> <Output Directory> <Layers List> <Process File> }"
+echo "       Example: > mbf_tab_gen MGC MGC_TABS \"1 2 3 4\" recipe.in"
+}
+    if [ "$1" != "TSMC" -a "$1" != "MGC" ]; then 
+          usage 
+	exit 1
+    fi
+    if [ "$1" = "TSMC" ]; then 
+        if [ "$2" = "" -o "$3" = ""  -o "$4" = ""  -o "$5" = ""  -o "$6" = "" ]; then
+          usage 
+	  exit 1
+	fi
+    fi
+
+    if [ "$1" = "MGC" ]; then 
+        if [ "$2" = "" -o "$3" = ""  -o "$4" = "" ]; then
+          usage 
+	  exit 1
+	fi
+    fi
+output_path=${2%/}
+rm -rf $output_path
+mkdir $output_path
+tmp_rul="${output_path}/tmp.rul"
+touch $tmp_rul
+dfmdb="${output_path}/tmp_dfmdb"
+generate_script="${output_path}/generate.tcl"
+touch $generate_script
+echo "PRECISION 1000" > $tmp_rul
+ echo "LAYOUT PATH  \"\$MGC_HOME/shared/pkgs/icv/examples/tab_gen/tabGen.gds\"" >> $tmp_rul 
+ echo "LAYOUT PRIMARY \"TAB_GEN\"" >> $tmp_rul 
+ echo "LAYOUT SYSTEM GDSII" >> $tmp_rul 
+ echo "" >> $tmp_rul 
+ echo "DFM DATABASE DIRECTORY \"$dfmdb\" OVERWRITE REVISIONS" >> $tmp_rul 
+ echo "ANNOTATE [\"DFM_CMP_SIMULATOR\" = \"$1\"]" >> $tmp_rul 
+ echo "ANNOTATE [\"DFM_CMP_PROCESS_FILE\" = \"$4\"]" >> $tmp_rul
+    if [ "$1" = "TSMC" ]; then 
+     echo "ANNOTATE [\"DFM_CMP_TECHNOLOGY\" = \"$5\"]" >> $tmp_rul
+     echo "ANNOTATE [\"DFM_CMP_DDK_PATH\" = \"$6\"]" >> $tmp_rul
+     echo "if {[catch {cmp::generate_density_table \"TSMC\" \"$2\" {$3} \"$4\" \"$5\" \"$6\"} cError]} {" > $generate_script
+    else
+     echo "if {[catch {cmp::generate_density_table \"MGC\" \"$2\" \"$3\" \"$4\"} cError]} {" > $generate_script
+    fi
+ echo "LAYER EMPTY	9999" >> $tmp_rul
+ echo "LAYER MAP >= 0 DATATYPE >= 0 9999" >> $tmp_rul
+ echo "" >> $tmp_rul
+ echo "LAYER M1	2001" >> $tmp_rul
+ echo "" >> $tmp_rul
+ echo "LAYER MAP 2 DATATYPE 0 2001" >> $tmp_rul
+ echo "" >> $tmp_rul
+ echo "" >> $tmp_rul
+ echo "" >> $tmp_rul
+ echo "LAYER DMx1	2002" >> $tmp_rul
+ echo "" >> $tmp_rul
+ echo "LAYER MAP 150 DATATYPE 1 2002" >> $tmp_rul
+ echo "" >> $tmp_rul
+ echo "LAYER OPC1	2003" >> $tmp_rul
+ echo "" >> $tmp_rul
+ echo "LAYER MAP 31 DATATYPE 7 2003" >> $tmp_rul
+ echo "" >> $tmp_rul
+ echo "LAYER NONOPC1	2004" >> $tmp_rul
+ echo "" >> $tmp_rul
+ echo "LAYER MAP 31 DATATYPE 1 2004" >> $tmp_rul
+ echo "" >> $tmp_rul
+ echo "LAYOUT BASE LAYER M1" >> $tmp_rul
+ echo "" >> $tmp_rul
+ echo "DB_EXTENT = MERGE (EXTENT)" >> $tmp_rul
+ echo "FILL_EXTENT = DB_EXTENT SIZE BY -2.51" >> $tmp_rul
+ echo "FLAG OFFGRID YES" >> $tmp_rul
+ echo "FLATTEN VERY SMALL CELLS YES" >> $tmp_rul
+ echo "FLAG ACUTE YES" >> $tmp_rul
+ echo "FLAG SKEW YES" >> $tmp_rul
+ echo "FLAG NONSIMPLE YES" >> $tmp_rul
+ echo "#DECRYPT %%@~A73\"Y@(7M-Q0>OK)S,_S=/<]TYMO+7P3S<'/\\X6/1@9!#X2-),8F\";XAAN0K0F&0\\8A!!\"" >> $tmp_rul
+ echo "Q^+<;7N5'B9X^BZ\$R-\"[#!!!\"G*3S(E\";=6Z\`:;R20M3P6U-[!R2CF;X+G!'?_9MPMX-!#" >> $tmp_rul
+ echo "<\\DB;0\",\$^_H2\$5)@:%3P1!!\"@-1)7?IXY_*[;HV<@9IXLT6*(&XSU\$BC/*<8%_IH::!!#" >> $tmp_rul
+ echo "\\XM.#3=(S#JT_Y?N.(F9>Q!!\",\$(I2D\\!K,GV#9VD(XT<8QV;CWP(1&1F/@A'J=<J;].81B2>L=KPUL3<.[8R],^&!" >> $tmp_rul
+ echo "2&=1HI]T:W\"\\/;_\$D-F,]Q!!\"@?\\DZKOYSB>G3KQ04%DUH+\$1<!JJLJ5GMKN1\\9+A3#!!#" >> $tmp_rul
+ echo "#6CQ7DE:^#(;3NC\$\$=EZ(!!!\"U/\$EWU'DXHMOXJU2=N+5&&F13IJ6\`(&^C\\P7C:B3+RYY>Y735@0U[0Z[';BF\$JMA!" >> $tmp_rul
+ echo "\\XN&TY'LHN766[89\"\`/,0A!!\"O,@\$(:Z49#53^..3]&UIT2)\":R.EXR]\\W\`E)ZY\\4E2@)'&M,=X/5\`+>[I9*SSC4#!" >> $tmp_rul
+ echo "&T5C\$O.6MK/Y[A8\$\"RP:81!!\"+Y\`):G\$/;4M+P@>\"<T54T\\@<\"06@X/%H@'%*D%43'+-AB5PRI<'\"*O;@1CN%^O\"0!" >> $tmp_rul
+ echo "TO-S1'8#29P6_>.2#L0-?A!!\"QF?CH81AXB1>AC.1RN+*UT36#89=%^@9Q*0KT'L73Z!,;F\\TN)%PTKK[\\K[F>*4\\!" >> $tmp_rul
+ echo "-M6Y6:\`6T2@K9&US94T[ZQ!!\"CK9>.B#_O/DYI/]KV=%,OO(UOE9(L#;V\`?1GMLN%7@\\16H^\`08K\$B<&+P-S?)\`;3!" >> $tmp_rul
+ echo "+7D''8^P>0&9/DL'T)N2=1!!\"K.>1_,30:,5!O7,0:<._5JSI-YLS8=\$6LK+(:DXK]R8*\";6?6AT:ULL,X8?/KM-0!" >> $tmp_rul
+ echo "%V*5PBIP?07Y\$E1^[#=S=!!!\"[A6,Z;0ZX<9RM84C<AHH_'SNK#\":6T%8RR@6ID?P%N><5Y\$N<+=DWD\\^RBV0NLE-!" >> $tmp_rul
+ echo "I8=%A@AK,M'-&!1T;C\"HK1!!\"1_]0OX.&7BL#+^=60MZ-MJ8JOW=?,O\`FG,\$6HU1GFA'X]A=JB[+K()U,31&&)(%^EGXB@7V1YS_:8=\`Z9DKF[1!!\"" >> $tmp_rul
+ echo "S)7VUZ&@'K?.&(BJGW\\AN1!!\"6RS\\\\J<SXI18IQ\$J[6.AX#\$\"]\\#\"@NP\`TXR\$N\`\"YT7KGS)*'O7@\$QT2*>?*P1MD@!" >> $tmp_rul
+ echo "R<IW>YCSF[XLWF,\"Z%)W-Q!!\"R(:>%@2NYA<5#&4G24#U5SB+1]\"\")_GN*@9W\"-S@^XH<:!N!3Z2HW;M.@3JM\"<VA!" >> $tmp_rul
+ echo "QZ0./UXT@E.AUZA;D^WN(A!!\"RS:WVL8DQ%&WX4EXTH<^&0-=M\$C;36\"1N[7JF>3&OKLS&-#9=,6IG_**V&M;GVX]&)E9+&29]HF)P0(\$1XO(!Q!!\"" >> $tmp_rul
+ echo "M=#\"4])7PKYS&NRM<TX=;A!!\"*ZO=+H//W??,]G1N9U4'3X\`EO'QU\$7[C+6NB=CAP([L\"]D4E[UV.>M;F%7N:WXAJ0Z\$\`-(KMNIO^.QR\$)]\`1UQ!!\"" >> $tmp_rul
+ echo "5<;Y&>E&+QE1CM:K5A04*1!!\"%9]B_F_U>)2R=7\$UD<#V&OE.Z]LU&A@W_?N'>/4PZ*#0IMQR4H5XA/G>;WHRA#9\$77]+U=U]?&-]4>%Y;:Z\"5!!!\"" >> $tmp_rul
+ echo "/./\"YOCGAQB'<*CJ\`X>JAQ!!\"8IA&;R^4HD_FJ;_6%2#VZXHCL0\"\`C'=C,KCC=FX\$\\L[PIH1?;T>(\\'0+*\"/P7YT;A\`30!K'J\$>\"YRZ:(=LK]P#!)SQB0@!O\"\$!1K\`PDZ0\\9!#" >> $tmp_rul
+ echo "HG2[\`6]@SM33\\\$V3HX?+TA!!\">J#_6[\$=D7A06S8->_3S8N_5_G+?^]%(6\`%RJ>7\"1;\"T7E.\\@&QY3HOJRU8W2HF8<?_\"5#Z(7^JA'_)>H+D3]+B.<S!<CR::NS\"F)MMK^6I!#" >> $tmp_rul
+ echo "]4538K%T!N\$4Z\\-,N=M1OQ!!\"FCI\\#Y7<!FJKX(!N,)I&\`)824;B<#B<=LKCYD,T/P9D-CC:(*:K;\")3JU@8'8G8F<+='F.Z\`^BN4%6FBU.AF@ZBYK?J\"/,,X/\\*?\`]3JQ15!#" >> $tmp_rul
+ echo "IS.@C\$14ZRJE16_]\$D#CD!!!\"R-K7NN2#>;!,E&_\"/K)^G\"^=0\"==TL87+=CT@/CK0@U!#" >> $tmp_rul
+ echo "-YH[TE](R\$4W^EDSRA'-2A!!\":N[@N!%\`N*^/FP>[/?)'&K2E1#Y2\\)8OJ<IA18U>(?72;LB3WI8*B-Y&,]Q38BJ5!" >> $tmp_rul
+ echo "4L<D[_TFX,'>]\\A=3BC:O1!!\"\"NK#Q+MMD:OJ;[U?T(]39]Q?_615E2+##(C2;E&!I\$\")K;_>:'WITHDS>G)(TGJZ!" >> $tmp_rul
+ echo "\"H\\E[QF!;!7NRPRYO3%A>!!!\"X\\CJ[US[\`QK!Y5M5=?\\V<[9;BJYP!XSLKL*^(PX2I<=!#" >> $tmp_rul
+ echo "0VO'>Y=[\$\`6:=,6Y(8C/I1!!\"JD)IR&U%I\`8C\\EFGG.&SLZ42%<C)IWFUAU=#8.<V;LI2J7D6,.?+7A;H\$R\\<\`C@L!" >> $tmp_rul
+ echo "]/GW7\$E?Q*%B1Q\\83BGE_Q!!\"'IR/!\`KO>S*Z);BC#\$7PP[.I*0JAP&V+D(;6\$T_!B\`4']?U,(L0D5I,AF6)O;-QR!" >> $tmp_rul
+ echo ";EWM?5R((9T;&6=_6ZA\"#!!!\">:\\KPK;@TZY-\\21FD)8PW\`>^O@^&H5!<H8861,(>,-1!#" >> $tmp_rul
+ echo ")OT^O7[=BRAH4'7]<(W[91!!\";Z_IC3R[]7JE:%JO\\BLJ[ISBM\$LQU)EDJ7-?[1:V\$LP2?S#OG+^N,?:>:FO?+D/0!" >> $tmp_rul
+ echo "]F%BSV87AJ=S6&%KS9EA#1!!\"IKKU!:%_EQ_#U#\\(U&9ZT0OPZHQ#@''\`MK32=C)!Q<DXDDQ&SB'=DG;177[WFOT>!" >> $tmp_rul
+ echo ")Z\`=P[AZ'0[#PW7WL%/I\\1!!\"S&T_%\"B!&_@ED>^Z0\`MCK1!!\"" >> $tmp_rul
+ echo "5,A;8+=W=E]SI'8@U,O3<Q!!\".X9L.3SXKU-%9+CH9?*8+3M<BTY/E+\">]6-4TT)ZB89!#" >> $tmp_rul
+ echo ".2#J270IBFVS2HW_M6HRSQ!!\"DUUBYB!G[\\!9YHT2\`_&Z7(\\!3BZP\"!ZWGW26;]3AYX\`UY7.\"6IJW00B_>>@P=%2F!" >> $tmp_rul
+ echo "#ENDCRYPT" >> $tmp_rul
+ echo "" >> $tmp_rul
+ echo "" >> $tmp_rul
+ echo "VIRTUAL CONNECT COLON NO" >> $tmp_rul
+ echo "VIRTUAL CONNECT REPORT NO" >> $tmp_rul
+ echo "   error \$cError" >> $generate_script
+ echo "}" >> $generate_script
+
+ $MGC_HOME/bin/calibre -dfm -hier -cmp -nowait $tmp_rul -ys -cmp -exec $generate_script
+ rm -rf $dfmdb $generate_script $tmp_rul
+ 
+ 

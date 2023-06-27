@@ -1,0 +1,3 @@
+#! /bin/sh
+#\
+$MGC_HOME/bin/calibredrv $MGC_HOME/pkgs/icv/tvf/lfd/createRandomArray.tcl -- "$@"

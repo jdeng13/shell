@@ -1,0 +1,93 @@
+#!/bin/sh
+#*************************************************************************#
+#*   Copyright Mentor Graphics Corporation 2005  All Rights Reserved.    *#
+#*                                                                       *#
+#*   THIS WORK CONTAINS TRADE SECRET AND PROPRIETARY INFORMATION         *#
+#*   WHICH IS THE PROPERTY OF MENTOR GRAPHICS CORPORATION OR ITS         *#
+#*   LICENSORS AND IS SUBJECT TO LICENSE TERMS.                          *#
+#*************************************************************************#
+
+# Disable the message about deprecated RHEL 5 operating system for FXOR mode
+ans=`echo ${CALIBRE_CMD_LINE} | grep -w "\-fx"`
+if [ ! -z "$ans" ]
+then
+    export SKIP_OS_CHECKS=1
+fi
+
+if test -z "$CALIBRE_HOME"
+then
+  # CALIBRE_HOME is not set, use MGC_HOME
+  CALIBRE_HOME="$MGC_HOME"
+else
+  if test -z "$MGC_HOME"
+  then
+    # MGC_HOME is not set, use CALIBRE_HOME
+    MGC_HOME="$CALIBRE_HOME"
+  else
+    if test "$MGC_HOME" = "$CALIBRE_HOME"
+    then
+      # both are set, but are the same -- no problem
+      :
+    else
+      # both are set, and are different
+      echo "WARNING: \$CALIBRE_HOME and \$MGC_HOME are different, using \$CALIBRE_HOME=$CALIBRE_HOME" >&2
+      MGC_HOME="$CALIBRE_HOME"
+    fi
+  fi
+fi
+
+export CALIBRE_HOME MGC_HOME
+
+# For flow indication purpose.
+export MGC_FDI_DBDIFF_FLOW="DBDIFF"
+
+
+DEV_VCO=$VCO
+
+#set the flag for ignoring OA_COMPILER
+ignore_oacompiler="1"
+#set the flag for using stl4 compiled version on solaris
+stl4_enable="0"
+if test -z "$FDI_USE_FDI_ENV"
+then
+	FDI_ENV="$CALIBRE_HOME/bin/calibre_env"
+else 	
+	FDI_ENV="$CALIBRE_HOME/bin/fdi_env"
+fi	
+FDI_UTIL="$CALIBRE_HOME/bin/fdi_util"
+SW_WKSTN=''  # dont do type check yet
+
+. $FDI_ENV
+. $FDI_UTIL
+
+test -z "$MGC_VCO" && exit 1
+#The fdi_env script sets the MGC_VCO variable use it to set the VCO variable and export
+VCO=$MGC_VCO ; export VCO;
+
+# environment check, script issues any needed messages.
+switches="$* $FDI_CMD_LINE_ARGS"
+#echo "The command line arguments are" 
+#echo $switches;
+#echo "Done with the args";
+parse $switches
+
+dbdiff_cmd=$CALIBRE_HOME/pkgs/fdi/pvt/dbdiff.mod
+if [ "$PICK_64" = "1" ]; then
+dbdiff_cmd=$CALIBRE_HOME/pkgs/fdi/pvt/dbdiff_64.mod
+if [ "$stl4_enable" = "1" ]; then
+	dbdiff_cmd=$CALIBRE_HOME/pkgs/fdi/pvt/dbdiff_stlport_64.mod
+fi
+fi
+
+if test ! -x $dbdiff_cmd
+then
+	if [ "$PICK_64" = "1" ]; then
+	echo "ERROR: 64-bit dbdiff not found. Aborting..." >&2
+	exit 1
+	else
+	echo "ERROR: 32-bit dbdiff not found. Aborting..." >&2
+	exit 1
+	fi
+fi
+
+exec $FDI_INSTRUMENT_EXEC $dbdiff_cmd $switches

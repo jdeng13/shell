@@ -1,0 +1,1113 @@
+#!/bin/sh
+#*************************************************************************#
+#*   Copyright Mentor Graphics Corporation 2005  All Rights Reserved.    *#
+#*                                                                       *#
+#*   THIS WORK CONTAINS TRADE SECRET AND PROPRIETARY INFORMATION         *#
+#*   WHICH IS THE PROPERTY OF MENTOR GRAPHICS CORPORATION OR ITS         *#
+#*   LICENSORS AND IS SUBJECT TO LICENSE TERMS.                          *#
+#*************************************************************************#
+
+MINUS_SIXTY_FOUR_SEEN=
+MINUS_THIRTY_TWO_SEEN=
+fdi2gds_cmd=
+dbdiff_cmd=
+fdi2oasis_cmd=
+fdiBA_cmd=
+fdi2def_cmd=
+RUNDIR_OPTION_SEEN=
+RUNDIR_OPTION_SEEN_IN_READ_DB_ARGS=
+WIDE_VCO=
+oahome_set="1"
+oacompiler_set="0"
+oa_version="22.43"
+oa_version_set="0"
+PICK_64="0"
+DEV_VCO=$VCO
+
+unamer=`uname -r`
+unames=`uname -s`
+unamem=`uname -m`
+OS_AVX2=''              # 'avx2' on an avx2 capable box
+OS_MINOR_REV=''
+
+prev_arg_system="0";
+prev_arg_refsystem="0"
+prev_arg_db="0";
+error_case="0";
+db_OA="0";
+db_MW="0";
+db_LEFDEF="0";
+db_GDS="0";
+db_OASIS="0";
+db_FILEDEF="0";
+system_arg_present="0"
+switches=
+fastlefdef_disabled="0"
+cdslib_enabled="0"
+cdsLibDebug_available="0"
+ignore_cds_keywords="0"
+fdiba_color="0"
+ref_oa_version="0"
+oa_version_specified="0"
+svrf_encrypt="$MGC_HOME/bin/calsvrfencrypt"
+
+processRunDirOption()
+{
+    run_dir=""
+    our_switches=""
+    run_dir_present="0"
+	evaluate_rundir=$1;
+	shift
+    for opt in $@; do
+            if [ "$run_dir_present" = "1" ]; then
+            case $opt in
+                -*) run_dir="";our_switches="${our_switches} ${opt}" ;;
+                 *) run_dir=$opt;;
+            esac;
+            run_dir_present="0"
+            else
+            db_opt=`echo $opt | tr "[:lower:]" "[:upper:]"`
+            if [ "$db_opt" = "-RUNDIR" ]; then
+                run_dir_present="1"
+            else
+                our_switches="${our_switches} ${opt}"
+            fi
+            fi
+    done
+
+    if [ "$run_dir_present" = "1" ]; then
+        run_dir=""
+    fi
+
+	if [ $evaluate_rundir = "1" ]; then
+    if test -z "$run_dir"
+    then
+        echo "No run directory has been specified. Using current directory as working directory." >&2
+        return
+    fi
+
+    if [ -d $run_dir ]; then
+        cd $run_dir
+    else
+        echo "$run_dir is not a valid directory. Using current directory as working directory." >&2
+    fi
+	fi
+}
+
+
+#
+# parseArgs parses the Arguments 
+#       
+
+parseArgs()
+{
+system_arg_seen=0
+for arg in $@
+do
+    if [ "$prev_arg_db" -eq "1" ]; then
+            case $arg in
+                -*) ;;
+                *)  if [ "$db_MW" -eq "1" ]; then
+                       echo "WARNING: Version argument not required for MILKYWAY" >&2;
+                    fi
+                    if [ "$db_LEFDEF" -eq "1" ]; then
+                       echo "WARNING: Version argument not required for LEFDEF" >&2;
+                    fi
+                    if [ "$db_GDS" -eq "1" ]; then
+                       echo "WARNING: Version argument not required for GDS" >&2;
+                    fi
+                    if [ "$db_OASIS" -eq "1" ]; then
+                       echo "WARNING: Version argument not required for OASIS" >&2;
+                    fi
+                    ;;
+            esac;
+            prev_arg_system="0"; prev_arg_db="0";
+      fi
+      if [ "$prev_arg_system" = "1" ]; then
+             db_arg=`echo $arg |tr "[:lower:]" "[:upper:]"`
+             case $db_arg in
+                  OA )  prev_arg_system="0"; prev_arg_db="1"; db_OA="1";;
+                  MILKYWAY ) echo "ERROR: The MILKYWAY system is deprecated."; exit 1;;
+                  LEFDEF ) prev_arg_system="0"; prev_arg_db=1; db_LEFDEF="1";;
+                  GDS ) prev_arg_system="0"; prev_arg_db=1; db_GDS="1";;
+                  OASIS ) prev_arg_system="0";prev_arg_db=1;db_OASIS="1";;
+                  -*) echo "ERROR: Valid Database not specified exiting" >&2 ; prev_arg_system="0"; prev_arg_db="0"; error_case="1"; exit 1;;
+                  *) echo "ERROR: Valid Database not specified exiting" >&2 ; prev_arg_system="0"; prev_arg_db="0"; error_case="1"; exit 1;;
+             esac;
+     fi
+     case $arg in
+     	-system) prev_arg_system="1" system_arg_present="1" system_arg_seen=`expr $system_arg_seen + 1`;;
+     esac
+     if [ "$system_arg_seen" = "2" ]; then
+          echo "ERROR: -system is specified twice exiting..." >&2
+          exit 1;
+     fi
+done
+
+     if [ "$prev_arg_system" = "1" ]; then
+          echo "ERROR: Mandatory argument not specified for -system specified exiting..." >&2
+          exit 1;
+     fi
+     if [ "$error_case" = "1" ]; then
+          echo "ERROR: Invalid system argument specified exiting..." >&2
+          exit 1;
+     fi
+}
+
+#
+#prseArgsFdiBA This function parses the Arguments.The main difference 
+#in this function and parseArgs is fdiBA doesn't support -system GDS
+#
+parseArgsFdiBA()
+{
+system_arg_seen=0
+for arg in $@
+do
+    if [ "$prev_arg_db" -eq "1" ]; then
+            case $arg in
+                  -*) ;;
+                  *)  if [ "$db_MW" -eq "1" ]; then
+                          echo "WARNING: Version argument not required for MILKYWAY" >&2;
+                      fi
+                      if [ "$db_FILEDEF" -eq "1" ]; then
+                          echo "WARNING: Version argument not required for LEFDEF" >&2;
+                      fi
+                      ;;
+            esac;
+           prev_arg_system="0"; prev_arg_db="0";
+     fi
+     if [ "$prev_arg_system" = "1" ]; then
+        db_arg=`echo $arg |tr "[:lower:]" "[:upper:]"`
+        case $db_arg in
+              OA )  prev_arg_system="0"; prev_arg_db="1"; db_OA="1";;
+              MILKYWAY ) echo "ERROR: The MILKYWAY system is deprecated."; exit 1;;
+              FILEDEF ) prev_arg_system="0"; prev_arg_db=1; db_FILEDEF="1";;
+              LEFDEF ) prev_arg_system="0"; prev_arg_db=1; db_FILEDEF="1";;
+              *) echo "ERROR: Valid Database not specified" >&2 ; prev_arg_system="0"; prev_arg_db="0"; error_case="1"; exit 1;;
+        esac;
+     fi
+     case $arg in
+     	-system) prev_arg_system="1" system_arg_present="1" system_arg_seen=`expr $system_arg_seen + 1`;;
+        -color) fdiba_color="1";;
+     esac
+     if [ "$system_arg_seen" = "2" ]; then
+          echo "ERROR: -system is specified twice exiting..." >&2
+          exit 1;
+     fi
+done
+    if [ "$prev_arg_system" = "1" ]; then
+       echo "ERROR: Mandatory argument not specified for -system specified exiting..." >&2
+       exit 1;
+    fi
+    if [ "$error_case" = "1" ]; then
+       echo "ERROR: Invalid system argument specified exiting..." >&2
+       exit 1;
+    fi
+
+}
+
+
+#
+# parseArgsDbDiff
+# This function parses the arguments for their validity
+#
+parseArgsDbDiff()
+{
+system_arg_seen=0
+for arg in $@
+do
+    if [ "$prev_arg_db" -eq "1" ]; then
+        #echo "prev_arg_db is ONE";
+        case $arg in
+            -*) if [ "$db_OA" -eq "1" ] && [ "$prev_arg_refsystem" -eq "1" ]; then
+                    ref_oa_version="22.43"
+                fi
+                prev_arg_system="0"; prev_arg_db="0"; prev_arg_refsystem="0" ;;
+            *)  if [ "$db_MW" -eq "1" ]; then
+                        echo "WARNING: Version argument not required for MILKYWAY" >&2;
+                 fi
+                 if [ "$db_LEFDEF" -eq "1" ]; then
+                        echo "WARNING: Version argument not required for LEFDEF" >&2;
+                 fi
+                 if [ "$db_GDS" -eq "1" ]; then
+                        echo "WARNING: Version argument not required for GDS" >&2;
+                 fi
+                 if [ "$db_OASIS" -eq "1" ]; then
+                        echo "WARNING: Version argument not required for OASIS" >&2;
+                 fi
+                 if [ "$db_OA" -eq "1" ] && [ "$prev_arg_refsystem" -eq "1" ]; then
+                    case $arg in
+                        22.50) ref_oa_version="22.50" ;;
+                        22) ref_oa_version="22.43" ;;
+                        22.43) ref_oa_version="22.43" ;;
+                        22.60) ref_oa_version="22.60" ;;
+                        *) echo "ERROR: Invalid OA version specified in command line. For 22.43 it should be set to \"\", \"22\" or \"22.43\". For 22.50 - \"22.50\". For 22.60 - \"22.60\"."; exit 1;;
+                    esac;
+                    oa_version_specified="1"
+                fi
+                 prev_arg_system="0"; prev_arg_db="0"; prev_arg_refsystem="0"; db_OA="1";;
+        esac;
+    fi
+
+    if [ "$prev_arg_system" = "1" ] || [ "$prev_arg_refsystem" = "1" ]; then
+        db_arg=`echo $arg |tr "[:lower:]" "[:upper:]"`
+        case $db_arg in
+            OA )  prev_arg_system="0"; prev_arg_db="1"; db_OA="1";;
+            MILKYWAY ) echo "ERROR: The MILKYWAY system is deprecated."; exit 1;;
+            #Changed by Sharad for dts0100402426 on 29 May 2007
+            GDS ) prev_arg_system="0"; prev_arg_refsystem="0"; prev_arg_db=0; db_GDS="1";;
+			OASIS ) prev_arg_system="0"; prev_arg_refsystem="0"; prev_arg_db=0; db_OASIS="1";;
+			LEFDEF ) prev_arg_system="0"; prev_arg_refsystem="0"; prev_arg_db=0; db_LEFDEF="1";;
+            *) prev_arg_system="0"; prev_arg_db="0";;
+            # *) echo "ERROR: Invalid database type" $db_arg "specified, valid types are GDS OASIS OA LEFDEF" >&2 ; prev_arg_system="0"; prev_arg_db="0"; error_case="1"; exit 1;;
+        esac;
+    fi
+    case $arg in
+    	-system) prev_arg_system="1" system_arg_present="1" system_arg_seen=`expr $system_arg_seen + 1`;;
+    esac
+    case $arg in
+        -refsystem) prev_arg_refsystem="1" ;;
+    esac
+    if [ "$system_arg_seen" = "2" ]; then
+    	echo "ERROR: -system is specified twice exiting..." >&2
+        exit 1;
+    fi
+done
+
+   if [ "$prev_arg_system" = "1" ]; then
+    	echo "ERROR: Mandatory argument not specified for -system specified exiting..." >&2
+    	exit 1;
+   fi
+   if [ "$error_case" = "1" ]; then
+        echo "ERROR: Invalid system argument specified exiting..." >&2
+        exit 1;
+   fi
+
+
+}
+
+
+#
+#thirtytwoSeen() will check whether -32 is in the switch or not!
+#
+
+thirtytwoSeen()
+{
+for opt in $@; do
+    case "$opt" in
+          -32) MINUS_THIRTY_TWO_SEEN=1
+              ;;
+    esac
+done
+
+# backdoor setup for QA use only, acts same as -64 on command line
+if [ "$USE_CALIBRE_32" = "1" ]
+then
+   MINUS_THIRTY_TWO_SEEN=1
+fi
+
+}
+
+#
+#sixtyfourSeen() will check whether -64 is in the switch or not!
+# we also set the RUNDIR_OPTION_SEEN flag here.
+#
+
+sixtyfourSeen()
+{
+for opt in $@; do
+    case "$opt" in
+          -64) MINUS_SIXTY_FOUR_SEEN=1
+              ;;
+    esac
+    db_opt=`echo $opt |tr "[:lower:]" "[:upper:]"`
+    case "$db_opt" in
+         -RUNDIR) RUNDIR_OPTION_SEEN=1;;
+    esac
+done
+
+# backdoor setup for QA use only, acts same as -64 on command line
+if [ "$USE_CALIBRE_64" = "1" ]
+then
+   MINUS_SIXTY_FOUR_SEEN=1
+fi
+
+}
+
+#
+#resolve3264bit() this will check if both 32 and 64 are enabled and pick up 64
+#
+
+resolve3264bit()
+{
+	if [ "$MINUS_SIXTY_FOUR_SEEN" = "1" ];
+	then
+		if [ "$MINUS_THIRTY_TWO_SEEN" = "1" ];
+		then
+			echo "WARNING: Both 32 and 64 bit specified. Picking 64." >&2
+			MINUS_THIRTY_TWO_SEEN=0;
+		fi
+	fi
+}
+
+#
+# rundirSeen() 
+#
+rundirSeen()
+{
+ if [ "$RUNDIR_OPTION_SEEN" = "1" ]; then
+    processRunDirOption 1 $switches
+    switches=$our_switches
+ fi
+
+	rundirSeenInDBReadOptions
+}
+#
+# rundirSeenInDBReadOptions() 
+#
+rundirSeenInDBReadOptions()
+{
+is_rundir_to_be_evaluated="1"
+if test ! -z "$MGC_CALIBRE_DB_READ_OPTIONS"
+then
+	db_read_args=$MGC_CALIBRE_DB_READ_OPTIONS
+	for opt in $db_read_args; do
+    	db_opt=`echo $opt |tr "[:lower:]" "[:upper:]"`
+    	case "$db_opt" in
+         -RUNDIR) RUNDIR_OPTION_SEEN_IN_READ_DB_ARGS=1;;
+    	esac
+	done
+fi
+
+if [ "$RUNDIR_OPTION_SEEN_IN_READ_DB_ARGS" = "1" ]; then
+	if [ "$RUNDIR_OPTION_SEEN" = "1" ]; then
+		echo "WARNING: -rundir option already specified in command line options -rundir specified in DB_READ_OPTIONS will be ignored"
+		is_rundir_to_be_evaluated="0"
+	fi
+    processRunDirOption $is_rundir_to_be_evaluated $db_read_args
+    MGC_CALIBRE_DB_READ_OPTIONS=$our_switches
+	export MGC_CALIBRE_DB_READ_OPTIONS
+fi
+
+}
+
+
+#
+#setWide_Vco() this will set the variable WIDE_VCO=1 which is used only when running
+# in ssw/hpw build platform
+#
+
+setWide_Vco()
+{
+if [ "$BUILD64" = "1" ]
+then
+    WIDE_VCO=1
+fi
+}
+
+#
+# OA specific set up
+# checkOAHomeSet() This function will check whether the environmental variable OA_HOME is set or not. 
+# if OA_HOME is set then we set the flag oahome_set to 1 otherwise oahome_set is assigned 0.
+#
+
+checkOAHomeSet()
+{
+if test -z "$OA_HOME"
+then
+    oahome_set="0"
+fi
+}
+
+unsetOAHomeForLEFDEF()
+{
+arg_system="0";
+if [ "$oahome_set" = "1" ]; then
+for opt in $@; do
+    if [ "$arg_system" = "1" ]; then
+        arg=`echo $opt |tr "[:lower:]" "[:upper:]"`
+        case $arg in
+        LEFDEF ) oahome_set="0"; unset OA_PLUGIN_PATH ; export OA_PLUGIN_PATH;;
+		esac
+		arg_system="0";
+	fi	
+    case "$opt" in
+     	-system) arg_system="1";;
+    esac
+done
+fi
+}
+
+#
+# OA specific set up
+# checkOACompilerSet() This function will check whether the environmental variable OA_COMPILER
+# if OA_HOME is set then we set the flag oacompiler_set to 1 otherwise oacompiler_set is assigned 0.
+# This will also check for the valid OA_COMPILER value and the OA_HOME setting variable
+#
+
+checkOACompilerSet()
+{
+if test -z "$OA_COMPILER"
+then
+	if [ "$VCO" = "ixl" -a "$ignore_oacompiler" -ne "1" ]; then 
+	#If OA_HOME is set and OA_COMPILER is not set then treat OA_COMPILER as set to gcc411 un
+		if [ "$oahome_set" = "1" ]; then
+			oacompiler_set="1";
+		fi
+	fi
+else
+	#oa_home and oacompiler are supported only on linux
+	if [ "$VCO" = "ixl" -a "$ignore_oacompiler" -ne "1" ]; then 
+		if [ "$OA_COMPILER" = "gcc44x" ]; then
+			oacompiler_set="1";
+		fi
+	fi
+fi
+}
+
+# Check if -32 and -64 are specified on non-32 and non-64 bit trees
+choose32Or64Bit()
+{
+	if [ "$MINUS_SIXTY_FOUR_SEEN" = "1" ];
+	then
+		if [ -f $CALIBRE_HOME/lib/32bit ];
+		then
+			if [ ! -f $CALIBRE_HOME/pkgs/icv/pvt/calibre64 ];
+			then
+				echo "WARNING: Ignoring -64 switch specified on 32 bit only platform and running in 32 bit mode" >&2;
+				MINUS_SIXTY_FOUR_SEEN="0";
+			fi
+		fi
+	fi
+
+	if [ "$MINUS_THIRTY_TWO_SEEN" = "1" ];
+	then
+		if [ -f $CALIBRE_HOME/lib/64bit ];
+		then
+			echo "WARNING: Ignoring -32 switch specified on 64 bit only platform and running in 64 bit mode" >&2;
+			MINUS_THIRTY_TWO_SEEN="0";
+			MINUS_SIXTY_FOUR_SEEN="1";
+		fi
+	fi
+	#When no switches are specified then do it based on existence of files
+	if [ -z "$MINUS_THIRTY_TWO_SEEN"  -a  -z "$MINUS_SIXTY_FOUR_SEEN" ];
+	then
+		if [ -f $CALIBRE_HOME/lib/32bit ];
+		then
+			MINUS_THIRTY_TWO_SEEN="1";
+		fi
+		if [ -f $CALIBRE_HOME/lib/64bit ];
+		then
+			MINUS_SIXTY_FOUR_SEEN="1";
+		fi
+	fi
+}
+
+# platform specific set up
+# platformSetup()  This function will do platform specific setup.
+#
+platformSetup()
+{
+    if [ "$oa_version_set" = "0" ];
+    then
+        checkAndSetOAVersion;
+    fi
+
+    case "$oa_version" in
+        "22.43")
+                oadir="22.43p006"
+                ;;
+        "22.50")
+                oadir="22.50p064"
+                ;;
+        "22.60")
+                oadir="22.60p041"
+                ;;
+    esac
+
+    case $VCO in
+        "ixl"|"aoi"|"aoh"|"aoj"|"aok")
+            choose32Or64Bit;
+            # In case of RHEL 6.* using RHEL 4 and gcc44x OA build 
+            is_rhel_6="0"
+            is_rhel_7="0"
+            is_rhel_8="0"
+            is_sles="0"
+            if test -r /etc/redhat-release
+            then
+                linux_ver=`cat /etc/redhat-release | sed -e "s/.*elease *//" -e "s/ .*//"`
+                case $linux_ver in 
+                    6*) is_rhel_6="1";;
+                    7*) is_rhel_7="1";;
+                    8*) is_rhel_8="1";;
+                esac
+                 OS_MINOR_REV=`echo $linux_ver | sed -e 's/[0-9]*\.\([0-9]*\).*/\1/'`
+            else
+                if test -r /etc/issue
+                then
+                    if egrep -i 'suse.*sles.* [19]0*|suse.*enterprise.* [19]0*' </etc/issue >/dev/null 2>&1
+                    then
+                        is_sles="1"
+                        OS_MINOR_REV=`grep PATCHLEVEL /etc/SuSE-release 2>/dev/null \
+                               | sed -e 's/.*PATCHLEVEL *= *//'`
+
+                    fi  
+                fi 
+            fi
+            test -z "$OS_MINOR_REV" && OS_MINOR_REV=0
+            osflags=`cat /proc/cpuinfo 2>/dev/null \
+                    | grep '^flags[[:space:]]*:' 2>/dev/null | head -1`
+            echo $osflags | fgrep -wq avx2 2>/dev/null && OS_AVX2=avx2
+
+            if [ "$oahome_set" = "1" -o "$is_rhel_6" = "1" -o "$is_rhel_7" = "1" -o "$is_sles" = "1" ] && [ -d "$CALIBRE_HOME/pkgs/icv_oa/$oadir/lib/linux_rhel40_gcc44x_32" ]; then
+                oa_build=linux_rhel40_gcc44x_32;
+            else	
+                oa_build=linux_rhel40_32;
+            fi
+            if [ "$oacompiler_set" = "1" ]; then
+                oa_build=linux_rhel40_${OA_COMPILER}_32;
+            fi
+            if [ "$MINUS_SIXTY_FOUR_SEEN" = "1" ]; then
+                if test "$unamem" = "x86_64"
+                    then
+                    if [ "$VCO" = "aok" ] && [ -d "$CALIBRE_HOME/pkgs/icv_oa/$oadir/lib/linux_rhel80_gcc83x_64" ]; then
+                        oa_build=linux_rhel80_gcc83x_64;
+                    elif [ -d "$CALIBRE_HOME/pkgs/icv_oa/$oadir/lib/linux_rhel68_gcc62x_64" ]; then
+                        oa_build=linux_rhel68_gcc62x_64;                    
+                    else    
+                        echo "WARNING: OA libraries do not exist for this platform" >&2
+                        oa_build=linux_rhel68_gcc62x_64;
+                    fi
+                    PICK_64="1"
+                    if [ "$oacompiler_set" = "1" ]; then
+                        oa_build=linux_rhel40_${OA_COMPILER}_64;
+                    fi
+                else
+                    echo "WARNING: -64 switch invalid on this platform, ignored " >&2
+                fi
+            fi
+            ;;
+    esac
+
+    #The below variable will be set to pre-filtered path by calibre, if so use that
+    if test ! -z "$CALIBRE_READDB_LD_LIBRARY_PATH"
+        then
+            LD_LIBRARY_PATH="$CALIBRE_READDB_LD_LIBRARY_PATH"
+    fi
+    
+    FDI_USE_OA_LIBS=$CALIBRE_HOME/pkgs/icv_oa/$oadir/lib/$oa_build/opt/
+    LD_LIBRARY_PATH=$CALIBRE_HOME/pkgs/fdi/lib:$FDI_USE_OA_LIBS:$CALIBRE_HOME/lib:$CALIBRE_HOME/shared/lib:$LD_LIBRARY_PATH:
+
+    #following code will be enabled when $CALIBRE_HOME contains libraries ceated by fdi in icv_lib
+    if [ "$PICK_64" = "1" ]; then
+        icv_lib_path=$CALIBRE_HOME/pkgs/icv_lib/lib64
+        tools4fdi_lib_path=$CALIBRE_HOME/pkgs/icv_tools4fdi/tools4fdi/lib64
+    else 	
+        icv_lib_path=$CALIBRE_HOME/pkgs/icv_lib/lib32
+        tools4fdi_lib_path=$CALIBRE_HOME/pkgs/icv_tools4fdi/tools4fdi/lib32
+    fi	
+    LD_LIBRARY_PATH=$icv_lib_path:$tools4fdi_lib_path:$LD_LIBRARY_PATH
+
+    export LD_LIBRARY_PATH
+    if [ "$oahome_set" = "1" ]; then
+        OA_PLUGIN_PATH=$OA_HOME/data/plugins
+        export OA_PLUGIN_PATH
+    fi
+}
+
+updateSwitch()
+{
+
+if [ ! -z "$MINUS_SIXTY_FOUR_SEEN" ]
+then
+   # 64 bit
+      switches=`echo "$switches" | sed -e 's/^-64//g'`
+      switches=`echo "$switches" | sed -e 's/ -64//g'`
+fi
+
+if [ ! -z "$MINUS_THIRTY_TWO_SEEN" ]
+then
+   # 32 bit
+      switches=`echo "$switches" | sed -e 's/^-32/ /g'`
+      switches=`echo "$switches" | sed -e 's/ -32/ /g'`
+fi
+}
+
+#
+# TCL settings
+# tclSetup() This function will set environmental variable for TCL
+#
+tclSetup()
+{
+TCL_LIBRARY=$CALIBRE_HOME/pkgs/icv_comp/8.4/lib/tcl
+ITCL_LIBRARY=$CALIBRE_HOME/pkgs/icv_comp/8.4/lib/itcl3.2
+TCLLIBPATH=$CALIBRE_HOME/pkgs/fdi/tcl
+export ITCL_LIBRARY TCL_LIBRARY TCLLIBPATH
+
+}
+
+checkFastLefdefDisabled()
+{
+ prev_arg_system_fl="0";
+if test  -z "$CALIBRE_FDI_FAST_LEFDEF_DISABLE"
+then	
+	for arg in $@
+	do
+        if [ "$prev_arg_system_fl" = "1" ]; then
+                db_arg=`echo $arg |tr "[:lower:]" "[:upper:]"`
+                case $db_arg in
+                        LEFDEF ) prev_arg_system_fl="0"; fastlefdef_disabled="1";;
+                esac;
+        fi
+		case $arg in
+			-system) prev_arg_system_fl="1";;
+            -* ) prev_arg_system_fl="0";;
+		esac
+		done
+fi
+}
+
+#
+#parseArgsFdi2Def
+# This function checks the validity of the input switch for fdi2def
+#
+
+parseArgsfdi2def()
+{
+system_arg_seen=0
+for arg in $@
+do
+        if [ "$prev_arg_db" -eq "1" ]; then
+                #echo "prev_arg_db is ONE";
+                case $arg in
+                        -*) prev_arg_system="0"; prev_arg_db="0";;
+                        *)  if [ "$db_MW" -eq "1" ]; then
+                                   echo "WARNING: Version argument not required for MILKYWAY" >&2;
+                             fi
+                             prev_arg_system="0"; prev_arg_db="0"; db_OA="1";;
+                esac;
+        fi
+
+        if [ "$prev_arg_system" = "1" ]; then
+                db_arg=`echo $arg |tr "[:lower:]" "[:upper:]"`
+                case $db_arg in
+                        OA )  prev_arg_system="0"; prev_arg_db="1"; db_OA="1";;
+                        MILKYWAY ) echo "ERROR: The MILKYWAY system is deprecated."; exit 1;;
+                        LEFDEF ) prev_arg_system="0"; prev_arg_db="1";db_LEFDEF="1";;
+                        -*) echo "ERROR: Valid Database not specified">&2 ; prev_arg_system="0"; prev_arg_db="0"; error_case="1"; exit 1;;
+                esac;
+        fi
+     case $arg in
+     	-system) prev_arg_system="1" system_arg_present="1" system_arg_seen=`expr $system_arg_seen + 1`;;
+     esac
+     if [ "$system_arg_seen" = "2" ]; then
+          echo "ERROR: -system is specified twice exiting..." >&2
+          exit 1;
+     fi
+done
+
+if [ "$prev_arg_system" = "1" ]; then
+        echo "ERROR: Mandatory argument not specified for -system specified exiting..." >&2
+        exit 1;
+fi
+
+if [ "$error_case" = "1" ]; then
+        echo "ERROR: Invalid system argument specified exiting..." >&2
+        exit 1;
+fi
+
+}
+
+#
+#OA system only:
+# if -libdefs option is not set and cds.lib exists in current directory
+# then need to convert cds.lib to lib.defs. The converted lib.defs will be
+# located in $MGC_TMPDIR and will be passed to FDI tools via command line switches.
+
+# The function below checks whether it is needed to convert cds.lib
+checkCdslibEnabled ()
+{
+    switches="$@"
+    regex1=`echo $switches | awk '{print toupper($0)}' | sed -n "/SYSTEM[[:space:]]*OA[[:space:]]/p"`
+    regex2=`echo $switches | awk '{print toupper($0)}' | sed -n "/SYSTEM[[:space:]]*OA$/p"`
+    regex3=`echo $switches | awk '{print toupper($0)}' | sed -n '/-LIBDEFS/p'`
+    regex4=`echo $switches | awk '{print toupper($0)}' | sed -n '/-OALIBDEFS/p'`
+    if test -z "$regex3"
+    then
+        if test -z "$regex4"
+        then
+            if test -f cds.lib
+            then
+                if test -n "$regex1"
+                then
+                    cdslib_enabled=1
+                fi
+                if test -n "$regex2"
+                then
+                    cdslib_enabled=1
+                fi
+            fi
+        fi
+    fi
+}
+
+# Check, whether the cdsLibDebug tool is available for use
+check_cdsLibDebug ()
+{
+    cdsLibDebug_available="0"
+    case "$MGC_VCO" in
+        ir*)
+            cdsLibDebug_available="0" ;;
+        *)
+            cdsLibDebug &> /dev/null
+            if test $? = 0
+            then
+                cdsLibDebug_available="1"
+            fi
+        esac
+}
+
+# Convert the cds.lib to lib.defs and return its location
+cdslib2libdefs ()
+{
+    cur_dir=`pwd`
+    flatCdslib=$MGC_TMPDIR/$$_flat_lib.defs
+    resultLibdefs=$MGC_TMPDIR/$$_result_lib.defs
+    check_cdsLibDebug
+    if test $cdsLibDebug_available = 1
+    then
+        ignore_cds_keywords="1"
+        flattenCdslib $cur_dir/cds.lib > $flatCdslib
+        fdiGeneratedLibDefs=$MGC_TMPDIR/$$_fdi_lib.defs
+        convertFlattenedCdslib $flatCdslib $fdiGeneratedLibDefs
+        cdsLibDebug -cla | sed -n 's/^[ \t][ \t]*[0-9][0-9]*[ \t][ \t]*\([^ \t][^ \t]*\)[ \t][ \t]*\([^ \t][^ \t]*\)/DEFINE \1 \2/p' > $resultLibdefs
+        grep ASSIGN $fdiGeneratedLibDefs >> $resultLibdefs
+    else
+        flattenCdslib $cur_dir/cds.lib > $flatCdslib
+        convertFlattenedCdslib $flatCdslib $resultLibdefs
+    fi
+    echo "$resultLibdefs"
+}
+
+flattenCdslib () {
+    local file=$1
+    local dir=`dirname $file`
+#Collect list of included file names to avoid recursive self inclusion
+    listOfAllFileNames=$listOfAllFileNames:$file
+    while read line
+    do
+#write first word in uppercase
+       line=`echo $line | awk '{$1=toupper($1) ; print $0}'`
+#parse Cadence specific expressions
+       if test $ignore_cds_keywords = "1"
+       then
+           line=`parseCdsExprSkippingKeywords "$line"`
+       else
+           line=`parseCdsExpr "$line"`
+       fi
+       if test "$line" = "ERROR"
+       then
+           exit 1
+       fi
+       if test "$line" = ""
+       then
+           continue
+       fi
+       case $line in
+            SOFTINCLUDE\ *)
+               includedFile=`eval echo $line | awk '{print $2}'`
+               case $includedFile in
+                   /*)
+                   ;;
+                   *)
+                   includedFile=$dir/$includedFile
+                   ;;
+               esac
+               if test ! -f "$includedFile"
+               then
+                   continue
+               fi
+               if [[ $listOfAllFileNames != *${includedFile}* ]]
+               then
+                   flattenCdslib $includedFile
+               fi
+               ;;
+            INCLUDE\ *)
+               includedFile=`eval echo $line | awk '{print $2}'`
+               case $includedFile in
+                   /*)
+                   ;;
+                   *)
+                   includedFile=$dir/$includedFile
+                   ;;
+               esac
+               if test ! -f "$includedFile"
+               then
+                   if test $ignore_cds_keywords = "0"
+                   then
+                       echo "WARNING: $includedFile cannot be found. Requested in $file" 1>&2
+                   fi
+                   continue
+               fi
+               if [[ $listOfAllFileNames != *${includedFile}* ]]
+               then
+                   flattenCdslib $includedFile
+               fi
+               ;;
+            SOFTDEFINE\ *)
+               pathToLib=`eval echo $line | awk '{print $3}'`
+               case $pathToLib in
+                   /*)
+                   ;;
+                   *)
+                   pathToLib=$dir/$pathToLib
+                   ;;
+               esac
+               if test ! -d "$pathToLib"
+               then
+                   continue
+               fi
+               libName=`echo $line | awk '{print $2}'`
+               echo "DEFINE $libName $pathToLib"
+               ;;
+             DEFINE\ *)
+               pathToLib=`eval echo $line | awk '{print $3}'`
+               case $pathToLib in                   
+                   /*)
+                   ;;
+                   *)
+                   pathToLib=$dir/$pathToLib
+                   ;;
+               esac
+               if test ! -d "$pathToLib"
+               then                   
+                   if test $ignore_cds_keywords = "0"
+                   then
+                       echo "WARNING: $pathToLib cannot be found. Requested in $file" 1>&2
+                   fi
+                   continue
+               fi
+               libName=`echo $line | awk '{print $2}'`
+               echo "DEFINE $libName $pathToLib"
+               ;;
+            *)
+               echo $line
+            ;;
+        esac
+    done < $file
+}
+
+parseCdsExpr ()
+{
+    expr="$1"
+    regex1=`echo "$expr" | sed -n -e '/$(compute:THIS_FILE_INST_ROOT)/p' -e '/$(compute:THIS_TOOL_INST_ROOT)/p'`
+    regex2=`echo "$expr" | sed -n 's/.*$(inst_root_with:\([^)]*\)).*/\1/p'`
+    if test -n "$regex1"
+    then
+        if test -n "$CDS_INST_DIR"
+        then
+            expr=`echo "$expr" | sed -e "s%\$.compute:THIS_TOOL_INST_ROOT.%$CDS_INST_DIR%" -e "s%\$.compute:THIS_FILE_INST_ROOT.%$CDS_INST_DIR%"`
+        elif test -n "$CDS_ROOT"
+        then
+            expr=`echo "$expr" | sed -e "s%\$.compute:THIS_TOOL_INST_ROOT.%$CDS_ROOT%" -e "s%\$.compute:THIS_FILE_INST_ROOT.%$CDS_ROOT%"`
+        else
+            echo 'ERROR: CDS_ROOT or CDS_INST_DIR variables must be set to use $(compute:...) expressions' >&2
+            echo "ERROR"
+            exit 1
+        fi
+    fi
+    found=""
+    if test -n "$regex2"
+    then
+        found=0
+        path=`echo $PATH | sed 's/:/ /g'`
+        for i in $path
+        do
+            if test -e "$i/$regex2"
+            then
+                expr=`echo $expr | sed "s%\\$(inst_root_with:[^)]*)%$i%"`
+                found=1
+                break
+            fi
+        done
+        if test "$found" -eq "0"
+        then
+            echo "ERROR: cannot find installation root with $regex2. Requested in $file" >&2
+            echo "ERROR"
+            exit 1
+        fi
+    fi
+    echo "$expr"
+}
+
+parseCdsExprSkippingKeywords ()
+{
+    expr="$1"
+    regex1=`echo "$expr" | sed -n -e '/$(compute:THIS_FILE_INST_ROOT)/p' -e '/$(compute:THIS_TOOL_INST_ROOT)/p'`
+    regex2=`echo "$expr" | sed -n 's/.*$(inst_root_with:\([^)]*\)).*/\1/p'`
+    if test -n "$regex1"
+    then
+        expr=""
+    fi
+    if test -n "$regex2"
+    then
+        expr=""
+    fi
+    echo "$expr"
+}
+
+convertFlattenedCdslib ()
+{
+    inFile=$1
+    outFile=$2
+    tmpFile=$MGC_TMPDIR/$$.tmp
+    touch $outFile
+    while read line
+    do
+        case $line in
+            UNDEFINE\ *)
+                libName=`echo $line | awk '{print $2}'`
+                sed -e "/^DEFINE $libName/d" -e "/^ASSIGN $libName/d" $outFile > $tmpFile
+                cp $tmpFile $outFile
+                ;;
+            UNASSIGN\ *)
+                libName=`echo $line | awk '{print $2}'`
+                libAttr=`echo $line | awk '{print $3}'`
+                sed "/^ASSIGN $libName $libAttr/d" $outFile > $tmpFile
+                cp $tmpFile $outFile
+                ;;
+            *)
+                # Skip lines with ASSIGN and COMBINE
+                assign=`echo $line | awk '{print $1}'`
+                combine=`echo $line | awk '{print $3}'`
+                if ! [ "$assign" = "ASSIGN" -a "$combine" = "COMBINE" ]
+                then
+                    echo $line >> $outFile
+                fi
+
+        esac
+    done < $inFile
+#convert comments
+    sed -e 's/[[:space:]]--[[:space:]]/ # /' -e 's/^--[[:space:]]/# /' $outFile > $tmpFile
+    cp $tmpFile $outFile
+}
+
+
+checkAndSetOAVersion()
+{
+case "$MGC_FDI_OA_VERSION" in
+    "") ;;
+    "22") ;;
+    "22.43") ;;
+    "22.50")  oa_version="22.50" ;;
+    "22.60")  oa_version="22.60" ;;
+    *)
+        echo "ERROR: Invalid OA version specified in the MGC_FDI_OA_VERSION environment variable. For 22.43 it should be set to \"\" or \"22.43\". For 22.50 - \"22.50\". For 22.60 - \"22.60\".";
+        exit 1;
+        ;;
+esac
+oa_version_set="1"
+}
+#
+#parse() 
+# This function is a highlevel function which internally calls the parseArgs function depending upon the caller
+# also some other functions are also called here.
+#
+
+parse()
+{
+CMD=$0
+CMD=`echo "$CMD" | sed -e 's/\// /g'`
+CMD=`echo "$CMD" | sed -e 's/.* //g'`
+
+case $CMD in
+        fdi2gds)  parseArgs $@
+        ;;
+        fdi2oasis) parseArgs $@
+        ;;
+        fdiBA)  parseArgsFdiBA $@
+        ;;
+        dbdiff) parseArgsDbDiff $@
+        ;;
+        fdi2def) parseArgsfdi2def $@
+        ;;
+esac
+sys_oa_version="0"
+for arg in $@
+do
+    if [ "$prev_arg_db" -eq "1" ]; then
+        if [ "$db_OA" -eq "1" ]; then
+            case $arg in
+                -*) sys_oa_version="22.43" ;;
+                22.50) sys_oa_version="22.50"; oa_version_specified="1" ;;
+                22) sys_oa_version="22.43"; oa_version_specified="1" ;;
+                22.43) sys_oa_version="22.43"; oa_version_specified="1" ;;
+                22.60) sys_oa_version="22.60"; oa_version_specified="1" ;;
+                *) echo "ERROR: Invalid OA version specified in command line. For 22.43 it should be set to \"\", \"22\" or \"22.43\". For 22.50 - \"22.50\". For 22.60 - \"22.60\"."; exit 1;;
+            esac;
+        fi
+        prev_arg_system="0"; prev_arg_db="0";
+    fi
+    if [ "$prev_arg_system" = "1" ]; then
+        db_arg=`echo $arg |tr "[:lower:]" "[:upper:]"`
+        case $db_arg in
+            OA ) db_OA="1"; prev_arg_db="1";;
+            -*) prev_arg_system="0"; prev_arg_db="0";;
+            *) sys_oa_version=$ref_oa_version; prev_arg_system="0"; prev_arg_db="0";;
+
+            # -*) echo "ERROR: Valid Database not specified exiting" >&2 ; prev_arg_system="0"; prev_arg_db="0"; error_case="1"; exit 1;;
+        esac;
+        prev_arg_system="0";
+    fi
+    case $arg in
+        -system) prev_arg_system="1";;
+    esac
+done
+
+            if [ "$ref_oa_version" != "0" ] && [ "$sys_oa_version" != "0" ] ; then
+                if [ "$ref_oa_version" != "$sys_oa_version" ]; then
+                    echo "ERROR: Invalid OA version specified in command line. Both OA versions should be the same."; exit 1
+                fi
+            fi
+            if [ "$sys_oa_version" != "0" ]; then
+                if [ "$oa_version_specified" = "1" ]; then
+                    export MGC_FDI_OA_VERSION="$sys_oa_version"
+                fi
+            fi
+
+checkAndSetOAVersion
+
+switches=$@
+
+# need to check for -32 in command line and also -RUNDIR option
+thirtytwoSeen $@
+
+# need to check for -64 in command line and also -RUNDIR option
+sixtyfourSeen $@
+
+resolve3264bit
+
+#set the WIDE_VCO flag to be used in ssw/hpw
+setWide_Vco
+
+#need to check whether the OA_HOME set or not
+checkOAHomeSet
+unsetOAHomeForLEFDEF $@
+#need to check whether the OA_COMPILER is set or not
+checkOACompilerSet
+
+# do any platform specific setup
+# do appropriate setup for using shared libraries on this platform
+
+platformSetup
+
+rundirSeen 
+
+#if needed then update the switch ( remove -64 from the switch)
+updateSwitch 
+if [ "$CMD" = "fdiBA" ] ;then
+  #TCL Setup
+   tclSetup
+fi
+
+}

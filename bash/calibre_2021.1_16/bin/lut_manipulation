@@ -1,0 +1,23 @@
+#!/bin/bash
+#************************************************************************CPY10*#
+#*   Copyright Mentor Graphics Corporation 2005-2020                     CPY11*#
+#*                    All Rights Reserved.                               CPY12*#
+#*                                                                       CPY13*#
+#*   THIS WORK CONTAINS TRADE SECRET AND PROPRIETARY INFORMATION         CPY14*#
+#*   WHICH IS THE PROPERTY OF MENTOR GRAPHICS CORPORATION OR ITS         CPY15*#
+#*   LICENSORS AND IS SUBJECT TO LICENSE TERMS.                          CPY16*#
+#************************************************************************CPY17*#
+
+py3=$MGC_HOME/bin/calpython3
+python_dir=$MGC_HOME/pkgs/icv/pvt/py
+LUT_PATH=$python_dir/lut_manipulation
+run_pye=$python_dir/enc_dec/run_pye.pyc
+lut_pye=$LUT_PATH/lut_manipulation.pye
+
+$py3 $run_pye -file $lut_pye $@
+
+failed=$?
+exit $failed
+
+
+

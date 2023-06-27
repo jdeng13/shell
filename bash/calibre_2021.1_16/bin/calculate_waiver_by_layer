@@ -1,0 +1,38 @@
+#!/bin/sh
+# simple script to calculate which rule checks are executed when a layer set is given
+
+# PATH HACK--JTS
+PATH=${MGC_HOME}/bin:${MGC_HOME}/pkgs/icv/pvt:${PATH}
+export PATH
+
+RULE_DECK=$1
+LAYER_SET=$2
+RESULTS="Waiver_Results_$(date +%d)"
+rm -rf $RESULTS
+mkdir $RESULTS
+cp $RULE_DECK $RESULTS
+cp $LAYER_SET $RESULTS
+cd $RESULTS
+cat $(basename $RULE_DECK) > tt.cal
+echo "DRC SELECT CHECK BY LAYER " >> tt.cal
+cat $(basename $LAYER_SET) >> tt.cal
+FN=$(grep "LAYOUT PATH" tt.cal | awk '{print $3}')
+cp NOTHING.gds $(basename $FN)
+# now run calibre
+rm -f transcript.txt
+calibre -drc -hier tt.cal > transcript.txt 
+# calculate total rulechecks executed
+TOTAL_RULES=$(grep "TOTAL RULECHECKS EXECUTED" transcript.txt | awk '{print $6}')
+TOTAL_RULES=$(expr $TOTAL_RULES + 5)
+grep -A $TOTAL_RULES "DRC RULECHECK -> RESULTS DATABASE MAPPING" transcript.txt | head -n $TOTAL_RULES > partial.txt
+LEN=$(wc -l partial.txt | awk '{print $1}')
+LEN=$(expr $LEN - 5)
+tail -n $LEN partial.txt > ANSP.txt
+cat ANSP.txt | awk '{print $1}' > ANS.txt
+cd ..
+cp $RESULTS/ANS.txt waived_rules_by_layer.txt
+rm -rf $RESULTS
+echo "---- Rule checks from $1 waived by $(cat $2) are in waived_rules_by_layer.txt ----"
+cat waived_rules_by_layer.txt
+echo "---"
+echo "Done"

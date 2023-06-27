@@ -1,0 +1,1488 @@
+#!/bin/sh
+#************************************************************************CPY10*#
+#*   Copyright Mentor Graphics Corporation 2005-2013                     CPY11*#
+#*                      All Rights Reserved.                             CPY12*#
+#*                                                                       CPY13*#
+#*   THIS WORK CONTAINS TRADE SECRET AND PROPRIETARY INFORMATION         CPY14*#
+#*   WHICH IS THE PROPERTY OF MENTOR GRAPHICS CORPORATION OR ITS         CPY15*#
+#*   LICENSORS AND IS SUBJECT TO LICENSE TERMS.                          CPY16*#
+#************************************************************************CPY17*#
+#
+#
+################################################################################
+#
+#    Optional input environment variables:
+#      CALIBRE_CMD_LINE_ARGS -- additional arguments to append to the cmd line for Calibre
+#      CALIBREWB_CMD_LINE_ARGS -- additional arguments to append to the cmd line for Calibrewb/drv/lv/mdpv
+#      SKIP_CALIBRERC -- dont run startup file(s)
+################################################################################
+
+### shell script functions ###
+run_columbia () {
+# run_columbia is called with the following arguments:  $fullpath $args
+    # echo "//   #################################################################### "
+    # echo "//   ###      Calibre xACT SOC Beta Release                           ### "
+    # echo "//   ###                                                              ### "
+
+    # enable/disable script diagnostic messaging
+    verbose=0
+
+    if [ $verbose -ne 0 ]
+    then
+        echo "args are "
+        echo "fullpath = $fullpath"
+        echo "args = $args "
+    fi
+
+    xrc=0
+    xact=0
+    PEX_SOC_COUPLING="true"; export PEX_SOC_COUPLING
+    PEX_SOC_TURBO_COUNT=2 export PEX_SOC_TURBO_COUNT
+    PEX_SOC_TURBO_ALL="false" export PEX_SOC_TURBO_ALL
+    flow="all"
+
+    # stage="none"
+    # default stage is now "pdb"
+    stage="pdb"
+
+    for arg in $args
+	do
+	    if [ $verbose -ne 0 ]; then echo "arg = $arg"; fi
+	    case $arg in
+		-xrc) xrc=1; if [ $verbose -ne 0 ]; then echo "Got -xrc option"; fi;;
+		-xact) xact=1; if [ $verbose -ne 0 ]; then echo "Got -xact option"; fi;;
+		-pdb) stage="pdb";  if [ $verbose -ne 0 ]; then echo "Got -pdb option"; fi;;
+		-rc) flow="rc";  if [ $verbose -ne 0 ]; then echo "Got -rc option"; fi;;
+		-phdb) stage="phdb";  if [ $verbose -ne 0 ]; then echo "Got -phdb option"; fi;;
+		-fmt) stage="fmt";  if [ $verbose -ne 0 ]; then echo "Got -fmt option"; fi;;
+		*) rule_file=$arg;;
+	    esac
+	    if [ $verbose -ne 0 ]; then echo "arg = $arg"; fi
+	done
+
+    if [ "$stage" = 'pdb' ] && [ "$flow" = 'rc' ]
+    then
+        PEX_SOC_COUPLING="false"; export PEX_SOC_COUPLING
+    fi
+
+    if [ $verbose -ne 0 ]
+    then
+        echo "PEX_SOC_COUPLING = $PEX_SOC_COUPLING"
+    fi
+
+    if [ $verbose -ne 0 ]
+    then
+        echo "xrc = $xrc, xact = $xact, stage = $stage, flow = $flow"
+    fi
+
+    if [ $xrc -ne 0 ] || [ $xact -ne 0 ]
+    then
+        if [ "$stage" = 'phdb' ]
+        then
+            if [ $verbose -ne 0 ]; then echo "Running PHDB stage "; fi
+            CALIBRE_CMD_LINE="$fullpath $args"
+            export CALIBRE_CMD_LINE
+            eval $fullpath $args
+            exit $?
+        elif [ "$stage" == 'pdb' ]
+        then
+            if [ $verbose -ne 0 ]; then echo "Running PDB stage "; fi
+            if test -z "$XACT_SOC_PDB_SCRIPT"
+            then
+                CALIBRE_CMD_LINE="$fullpath $args"
+                export CALIBRE_CMD_LINE
+                eval $fullpath $args
+                exit $?
+            else
+                ### PDB stage involves
+                ###
+                ### Running Pinnacle with appropriate options.
+                if test -z "$COLUMBIA_PATH" && echo "## Env var COLUMBIA_PATH is not set" >&2
+                then
+                    exit 1
+                fi
+                last_arg_turbo=0
+                for arg in $args
+                    do
+                    [ ${last_arg_turbo} -ne 0 ] && expr "${arg}" + "0" >/dev/null 2>&1 && PEX_SOC_TURBO_COUNT="${arg}"
+                    last_arg_turbo=0
+                    case $arg in
+                        -turbo)
+                            PEX_SOC_TURBO_COUNT=0
+                            last_arg_turbo=1
+                        ;;
+                        -turbo_all)
+                            PEX_SOC_TURBO_ALL="true"
+                        ;;
+                        *) ;;
+                    esac
+                done
+                ### cmd="$COLUMBIA_PATH/gmain_exec "
+                cmd="$COLUMBIA_PATH/xact_soc_exec "
+                if [ $verbose -ne 0 ]; then echo "cmd = $cmd"; fi
+                xactsoc_filename="calibre_xact_soc_extract"
+                xactsoc_options="-m b -journal $xactsoc_filename.jou -log $xactsoc_filename.log -so $xactsoc_filename.tcl"
+                CALIBRE_CMD_LINE="$cmd $xactsoc_options"
+                export CALIBRE_CMD_LINE
+                exec $cmd $xactsoc_options
+            fi
+
+        elif [ "$stage" == 'fmt' ]
+        then
+            if [ $verbose -ne 0 ]; then echo "Running FMT stage "; fi
+            CALIBRE_CMD_LINE="$fullpath $args"
+            export CALIBRE_CMD_LINE
+            eval $fullpath $args
+            exit $?
+        else
+            echo "ERROR: unrecognized options $args"
+        fi
+        CALIBRE_CMD_LINE="$fullpath $args"
+        export CALIBRE_CMD_LINE
+        if [ $verbose -ne 0 ]; then echo "test -z $CALIBRE_PREPROCESS_ONLY &&  eval $fullpath $args"; fi
+    else
+        CALIBRE_CMD_LINE="$fullpath $args"
+        export CALIBRE_CMD_LINE
+        test -z "$CALIBRE_PREPROCESS_ONLY" &&  eval $fullpath $args
+    fi
+} # end run_columbia
+
+run_thermal() 
+{
+  CALIBRE_SKIP_OS_CHECKS=1       ## disable additional warning messages in subinvokes
+  export CALIBRE_SKIP_OS_CHECKS
+  
+  first_arg_thermal=0 
+  has_thermal_gui=0
+  has_project=0
+  has_config=0
+  projectName=''
+  configName=''
+  next_arg_projectName=0
+  next_arg_configName=0
+
+  for opt in "$@" $cmd_line_args
+  do
+    if test "x$opt" = "x-gui"
+    then 
+         has_thermal_gui=1    
+    elif test "x$opt" = "x-p" || test "x$opt" = "x-project"  
+    then
+         has_project=1
+         next_arg_projectName=1
+    elif test $next_arg_projectName -ne 0
+    then 
+         projectName=$opt
+         next_arg_projectName=0    
+    elif test "x$opt" = "x-c"
+    then
+         has_config=1
+         next_arg_configName=1
+    elif test $next_arg_configName -ne 0
+    then 
+         configName=$opt
+         next_arg_configName=0 
+    elif test $first_arg_thermal -eq 1
+    then 
+         args="$args $APOST$opt$APOST";        # append option to args
+    fi
+    first_arg_thermal=1
+  done  
+
+  if test $has_thermal_gui -ne 0
+  then
+    dfmdb=''
+    if test -z $projectName
+    then
+        :
+    else    
+        dfmdb="${projectName}_dfmdb"
+    fi
+
+    config=''
+    if test -z $configName
+    then
+        :
+    else
+        config=" -c ${configName}"
+    fi    
+
+    if test $has_project -ne 0  
+    then    
+       CALIBRE_CMD_LINE="$progname_dir/mpower -thermal -db $dfmdb $config $args"
+    else
+       CALIBRE_CMD_LINE="$progname_dir/mpower -thermal $config $args"
+    fi       
+
+    export CALIBRE_CMD_LINE
+    exec $CALIBRE_CMD_LINE
+  else  
+    CALIBRE_CMD_LINE="$CALIBRE_HOME/bin/thermal3dstack \"$@\""
+    export CALIBRE_CMD_LINE
+    exec $CALIBRE_HOME/bin/thermal3dstack "$@"
+  fi  
+} # end run_thermal
+
+run_melba ()
+{
+  CALIBRE_SKIP_OS_CHECKS=1       ## disable additional warning messages in subinvokes
+  export CALIBRE_SKIP_OS_CHECKS
+  width=''
+  turbo=''
+  remote=''
+  hyper=''
+  run_dir=`pwd`
+  system_argument=''
+  create_assembly_argument="''"
+  use_assembly_argument="''"
+  assembly_argument="''"
+  tsvfile=''
+  compile_only=0
+  precheck=0
+  melba_file="$CALIBRE_MELBA_TCL"
+  test -z "$melba_file" \
+    && melba_file="$MGC_HOME/pkgs/icv/userware/En_na/3dstack.tcl"
+
+  orig_cmd_line="$@"
+  while test "$1"
+  do
+    test -n "$tsvfile" && print_usage=1
+    case "$1" in
+      -3dstack) :               ;;
+      -turbo)
+                   turbo='-turbo'
+                   if test -z "$2"
+                   then
+                     # no argument following, we are done
+                     :
+                   else
+                     if echo "x$2" | grep '^x-' >/dev/null 2>&1
+                     then
+                       # no argument, another switch follows
+                       :
+                     else
+                       if echo "x$2" | grep '^x[0-9]\+$' >/dev/null 2>&1
+                       then
+                         # turbo count is specified
+                         turbo="-turbo $2"
+                         shift
+                       fi
+                     fi
+                   fi
+                   ;;
+      -remote*)
+                   if [ "$1" != "-remote" ] && [ "$1" != "-remotefile" ] && [ "$1" != "-remotecommand" ]
+                   then
+                    print_usage=1
+                    break
+                   fi
+                   if test -z "$2"
+                   then
+                    # no argument following, we are done
+                    print_usage=1
+                   else
+                    if test -z "$remote"
+                    then
+                      if [ "$1" == "-remotecommand" ]
+                      then
+                        if test -z "$3"
+                        then
+                          print_usage=1
+                        else
+                         if echo "x$3" | grep '^x[0-9]\+$' >/dev/null 2>&1
+                         then
+                          # count is specified  
+                          remote="$1 $2 $3"
+                          shift
+                         else
+                          print_usage=1
+                         fi
+                        fi     
+                      else
+                       remote="$1 $2"
+                      fi
+                      shift
+                    else
+                      print_usage=1
+                    fi
+                   fi
+                   ;;
+      -hyper)
+                   hyper="-hyper"
+                   if test -z "$2"
+                   then
+                    # no argument following, we are done
+                    :
+                   else
+                    if echo "x$2" | grep '^x-' >/dev/null 2>&1
+                    then
+                      # no argument, another switch follows
+                      :
+                    else
+                      if echo "x$2" | grep '^x[0-9]\+$' >/dev/null 2>&1
+                      then
+                        hyper="-hyper $2"
+                        shift
+                      fi
+                    fi
+                   fi 
+                   ;;
+      -no_cleanup) :   ;;
+      -compile_only) compile_only=1;;
+      -precheck) precheck=1;;
+      -run_dir)    shift
+                   if test -z "$1"
+                   then
+                     print_usage=1
+                   else
+                     run_dir="$1"
+                   fi
+                   ;;
+      -system)
+                   system_argument=1
+                   shift
+                   if test "$1" != GDS -a "$1" != OASIS
+                   then
+                     print_usage=1
+                   fi
+                   if test "$use_assembly_argument" = "1"
+                   then
+                     # use_assembly is mutually exclusive with system or create_assembly
+                     print_usage=1
+                   fi
+                   ;;
+      -create_assembly)
+                   create_assembly_argument=1
+                   if test -z "$2"
+                   then
+                     # no argument following, we are done
+                     print_usage=1
+                   else
+                     if echo "x$2" | grep '^x-' >/dev/null 2>&1
+                   then
+                       # required argument missing
+                       print_usage=1
+                   else
+                       # assembly name is specified
+                       shift
+                     fi
+                   fi
+                   if test "$use_assembly_argument" = "1" -o "$assembly_argument" = "1"
+                   then
+                     # create_assembly is mutually exclusive with assembly or use_assembly
+                     print_usage=1
+                   fi
+                   ;;
+      -use_assembly)
+                   use_assembly_argument=1
+                   shift
+                   if test "$create_assembly_argument" = "1" -o "$system_argument" = "1" -o "$assembly_argument" = "1"
+                   then
+                     # use_assembly is mutually exclusive with system, assembly or create_assembly
+                     print_usage=1
+                   fi
+                   ;;
+      -assembly)
+                   assembly_argument=1
+                   shift
+                   if test "$create_assembly_argument" = "1" -o "$use_assembly_argument" = "1"
+                   then
+                     # assembly is mutually exclusive with create_assembly or use_assembly
+                     print_usage=1
+                   fi
+                   ;;
+      -*)          print_usage=1   ;;
+      *)           tsvfile="$1"    ;;
+    esac
+    shift
+  done
+
+  if ( (test -n "$remote") || (test -n "$hyper") ) && (test -z "$turbo")
+  then
+   print_usage=1
+  fi
+
+  logFile="$run_dir/3dstack.log"
+  if [ -f "$logFile" ]
+  then
+    rm -f "$logFile"
+  fi
+
+  if test ! -d "$run_dir"
+  then
+    mkdir -p "$run_dir"
+    echo "// NOTE: Creating Run Directory $run_dir" | tee $logFile
+    if test ! -d "$run_dir" -o ! -r "$run_dir"
+    then
+      echo "ERROR: Either could not read or could not create directory $run_dir" >&2
+      exit 1
+    fi
+  fi
+  
+  test -z "$tsvfile" -o ! -r "$tsvfile" && print_usage=1
+  test "$compile_only" = "1" -a "precheck" = "1" && print_usage=1
+  if test "$print_usage"
+  then
+    if test "$CALIBRE_3DSTACK_ENABLE_PRECHECK" = "202008"
+    then
+        usage="Usage: $progname -3dstack { { [ -turbo [<processor-count>] [ -hyper [ <hyper-count> ] [ -remote <host,host,...> || -remotefile <filename> || -remotecommand <filename> <count> ] ] ] [-system <GDS | OASIS>] [ [-create_assembly <assembly-name>] || [-use_assembly <assembly-file-path>] || [-assembly <assembly-name>] ] } || -precheck }  [-run_dir <directory-name>] [-compile_only] <rule_file_name>"
+    else
+        usage="Usage: $progname -3dstack { { [ -turbo [<processor-count>] [ -hyper [ <hyper-count> ] [ -remote <host,host,...> || -remotefile <filename> || -remotecommand <filename> <count> ] ] ] [-system <GDS | OASIS>] [ [-create_assembly <assembly-name>] || [-use_assembly <assembly-file-path>] || [-assembly <assembly-name>] ] } }  [-run_dir <directory-name>] [-compile_only] <rule_file_name>"
+    fi
+    echo "$usage" | tee $logFile
+    exit 1
+  else
+    fullname="$progname_dir/$progname"
+    test -x ${fullname}${width} && fullname=${fullname}${width}
+  fi
+  
+  if test "`head -1 "$tsvfile"`" = '#!3dstack+'
+  then
+    tclsh="$MGC_HOME/bin/tclsh"
+    if test -x $fullname
+    then
+      i3dFile="$tsvfile"
+      tsvfile=`basename $i3dFile`
+      tsvfile="$run_dir/$tsvfile.3dstack"
+      tmpFile="$MGC_TMPDIR/$$.exit_status"
+      exit_code=0
+      { eval $fullname -ys -3dstack -exec "$MGC_HOME/pkgs/icv/userware/En_na/i3d.tcl $i3dFile -3dstack $tsvfile"; echo exit_code=$? > $tmpFile; } | tee -a $logFile
+      eval `tail -1 $tmpFile`
+      rm -f $tmpFile
+      test $exit_code -ne 0 && exit $exit_code
+      test "$compile_only" = "1" && exit
+      orig_cmd_line=`echo $orig_cmd_line | sed "s#${i3dFile}#${tsvfile}#g"`
+    else
+      echo "ERROR: Could not invoke $fullname" >&2
+      exit 1
+    fi
+  fi
+  
+  if test -x $fullname
+  then
+    tmp_db_name_file="$MGC_TMPDIR/$$.db_file_name"
+    rm -f "$tmp_db_name_file"
+    dfmdb_args="-dfmdb_namefile $tmp_db_name_file"
+    
+    CALIBRE_CMD_LINE="$fullname -dfm -dfm_ys $dfmdb_args -hier -3dstack $turbo $remote $hyper -tvfarg \"$orig_cmd_line\" $melba_file"
+    export CALIBRE_CMD_LINE
+    dfm_exit=0
+    tmpFile="$MGC_TMPDIR/$$.exit_status"
+    { eval $fullname "-dfm -dfm_ys $dfmdb_args -hier -3dstack $turbo $remote $hyper -tvfarg \"$orig_cmd_line\" $melba_file"; echo dfm_exit=$? > $tmpFile; } | tee -a $logFile
+    eval `tail -1 $tmpFile`
+    rm -f $tmpFile
+
+    db_file_name=`cat 2>/dev/null "$tmp_db_name_file"`
+    rm -f "$tmp_db_name_file"
+    test -r "$run_dir/NamedObjectDB.dat" -a -r "$db_file_name" && mv -f "$run_dir/NamedObjectDB.dat" "$db_file_name"
+    
+    # Encrypt the rule deck
+    ruleDeck="$run_dir/3dstack_deck.svrf.enc"
+    if [ -f "$ruleDeck" ]
+    then
+        sed 's/\/\/\/__3DSTACK__ENCRYPT__/#ENCRYPT/g;s/\/\/\/__3DSTACK__ENDCRYPT__/#ENDCRYPT/g' "$ruleDeck" > "$ruleDeck.tmp"
+        eval "$MGC_HOME/bin/caltxtencrypt" "$ruleDeck.tmp" "$ruleDeck" > /dev/null 2>&1
+        rm -f "$ruleDeck.tmp"
+    fi
+    
+    test $dfm_exit -eq 100 && exit 0; # when no checks are specified
+    test $dfm_exit -ne 0 && exit $dfm_exit
+    test "$create_assembly_argument" = "1" && exit
+    
+    dfmdb_args="-dfmdb $db_file_name"
+    melba_ys_file="$CALIBRE_MELBA_YS_FILE"
+    if test -z "$melba_ys_file"
+    then
+      melba_ys_file="$MGC_TMPDIR/$$.melba_ys_file"
+      rm -f "$melba_ys_file"
+      echo "if { [catch { run_ys_flow } msg] } { return -code error \"\$msg\" }" > $melba_ys_file
+    fi
+    CALIBRE_CMD_LINE="$fullname -ys -3dstack $dfmdb_args $turbo -exec $melba_ys_file"
+    export CALIBRE_CMD_LINE
+    ys_exit=0
+    tmpFile="$MGC_TMPDIR/$$.exit_status"
+    { eval $fullname -ys -3dstack $dfmdb_args $turbo -exec $melba_ys_file; echo ys_exit=$? > $tmpFile; } | tee -a $logFile
+    eval `tail -1 $tmpFile`
+    rm -f $tmpFile
+    if test -z "$CALIBRE_MELBA_YS_FILE"
+    then
+      rm -f "$melba_ys_file"
+    fi
+    # The handling couldn't be done from
+    # tcl because it runs two executables: 3dstack and 3dstack+
+    # and if the handling was done for each executable 
+    # the output would be at the end of each log, not at the end
+    # of the whole run log
+    warningsFile="$run_dir/3dstack.warnings"
+    tmpWarningsFile="$MGC_TMPDIR/3dstack.warnings.$$"
+    rm -f "$tmpWarningsFile"
+    echo "" > ${warningsFile}
+    egrep "3DSTACK_WARNING_[0-9]{4}:" $logFile > $tmpWarningsFile
+    egrep "3DSTACK_ERROR_[0-9]{4}:" $logFile >> $tmpWarningsFile
+    if test -s "$tmpWarningsFile"
+    then
+        echo "3DSTACK+ WARNINGS/ERRORS" >> ${warningsFile}
+        echo "------------------------------------------------------------------------------------------" >> ${warningsFile}
+        cat ${tmpWarningsFile} >> ${warningsFile}
+        echo "" >> ${warningsFile}
+        echo "" >> ${warningsFile}
+    fi
+    egrep "3DSTACK_WARNING_[0-9]{3}:" $logFile > $tmpWarningsFile
+    egrep "3DSTACK_ERROR_[0-9]{3}:" $logFile >> $tmpWarningsFile
+    if test -s "$tmpWarningsFile"
+    then
+        echo "3DSTACK WARNINGS/ERRORS" >> ${warningsFile}
+        echo "------------------------------------------------------------------------------------------" >> ${warningsFile}
+        cat ${tmpWarningsFile} >> ${warningsFile}
+        echo "" >> ${warningsFile}
+        echo "" >> ${warningsFile}
+    fi
+    cat ${warningsFile} >> $logFile
+    cat ${warningsFile}
+    rm -f "$tmpWarningsFile"
+    exit $ys_exit
+  else
+    echo "ERROR: Could not invoke $fullname" >&2
+    exit 1
+  fi
+
+} # end run_melba
+
+kill_xvfb ()
+{
+    XDISPLAY=$1
+    if test `uname -s` = AIX
+    then
+        # Now kill Xvfb
+        cd /usr/tmp 2>/dev/null || cd /tmp 2>/dev/null
+        mkdir $$cf  2>/dev/null ## tmp dir, so if core file generated it can be deleted
+        cd $$cf 2>/dev/null
+        ulimit -c 0 >/dev/null 2>&1 ## prevent core file if possible
+        if test -f "/tmp/.X$XDISPLAY-lock"
+        then
+            kill -9 `cat /tmp/.X$XDISPLAY-lock`
+        else
+            `ps -ef| grep "calibre_Xvfb :$XDISPLAY" | awk '{print $2}'|xargs kill -9 > /dev/null 2>&1`
+        fi
+        cd .. 2>/dev/null
+        rm -rf $$cf 2>/dev/null
+    else
+        # Now kill Xvfb
+        if test -f "/tmp/.X$XDISPLAY-lock"
+        then
+            kill `cat /tmp/.X$XDISPLAY-lock`
+        else
+            `ps -ef| grep "calibre_Xvfb :$XDISPLAY" | awk '{print $2}'|xargs kill > /dev/null 2>&1`
+        fi
+    fi
+    if test -f "$tmpfile"
+    then
+        if test -n "$CALIBRE_ENABLE_RVE_DEBUG"; then
+            if test -s "$tmpfile"; then
+                sed -e 's/^/calibre_Xvfb: /' $tmpfile
+            fi
+        fi
+        `rm -f $tmpfile`
+    fi
+}
+
+### end shell script functions ###
+
+
+### begin main code ###
+test ! -z "$CALIBRE_SHOW_INVOCATION" && echo "## Initial arguments: $0 '$@'" >&2
+
+progname=`basename $0`
+APOST=''
+
+if echo "$SKIP_OS_CHECKS$CALIBRE_SKIP_OS_CHECKS" \
+     | grep -i '[y1t]' >/dev/null 2>&1
+then
+  # normalize setting
+  CALIBRE_SKIP_OS_CHECKS=1
+else
+  CALIBRE_SKIP_OS_CHECKS=''
+fi
+export CALIBRE_SKIP_OS_CHECKS
+
+if test ! -x $CALIBRE_HOME/bin/calibre_env
+then
+  if test -x $MGC_HOME/bin/calibre_env
+  then
+    CALIBRE_HOME=$MGC_HOME
+    export CALIBRE_HOME
+  else
+    # try to form canonical path to look for script
+    localdir=`/bin/pwd`
+    dotdir='^\.$'
+    testdir=`dirname $0 | sed -e "s!$dotdir!$localdir!" -e 's!/shared/pkgs/.*!!' -e 's!/pkgs/.*!!' -e 's!/bin/*$!!'`
+    testloc="$testdir/bin/calibre_env"
+    if test -x "$testloc"
+    then
+      CALIBRE_HOME=$testdir
+      export CALIBRE_HOME
+      # jam at front of PATH, just incase
+      PATH=$CALIBRE_HOME/bin:$PATH
+      export PATH
+      test -z "$CALIBRE_SKIP_OS_CHECKS" \
+        && echo "WARNING: Software tree location not set or invalid, using \$CALIBRE_HOME=$CALIBRE_HOME"
+    else
+      echo "ERROR: Invalid software tree, could not find \$MGC_HOME/bin/calibre_env." >&2
+      exit 1
+    fi
+  fi
+fi
+MGC_HOME=$CALIBRE_HOME
+export MGC_HOME
+
+. $CALIBRE_HOME/bin/calibre_env
+# calibre_env already output any error messages, just exit if MGC_VCO null
+test -z "$MGC_VCO" && exit 1
+
+# set WSMPLICPATH *after* CALIBRE_HOME/MGC_HOME settled
+WSMPLICPATH=$CALIBRE_HOME/pkgs/icv_coin/lib
+export WSMPLICPATH
+
+if test ! -w "$MGC_TMPDIR"
+then
+  if test -w "$CALIBRE_HOME/tmp"
+  then
+    MGC_TMPDIR="$CALIBRE_HOME/tmp"
+  else
+    MGC_TMPDIR="/usr/tmp"
+  fi
+fi
+export MGC_TMPDIR
+
+# set LD_LIBRARY_PATH
+. $CALIBRE_HOME/pkgs/icv/pvt/set_shared_library_path
+
+# execute startup(s) (if any) in the CALIBRE_HOME tree, followed by any user startup(s)
+if test -z "$SKIP_CALIBRERC"
+then
+  for dir in $CALIBRE_HOME/etc/cust/startup/calibrerc $HOME/.calibrerc
+  do
+    test -r $dir/global && . $dir/global
+    test -r $dir/$progname && . $dir/$progname
+  done
+fi
+
+CALIBRE_INITIAL_CMD_LINE="$0 $@"
+export CALIBRE_INITIAL_CMD_LINE
+if test -n "$CALIBRE_DISPLAY_ALL_ENV_VARS"
+then
+  echo "//  BEGIN:: Environment variable listing"
+  env | sort -u | sed -e 's#^#//  #'
+  echo "//  END:: Environment variable listing"
+fi
+
+
+# what is the actual application name?
+cmd_line_args="$CALIBRE_CMD_LINE_ARGS"
+first_arg=''
+this_pkg="icv$PREF_VCO"
+is_realtime=0
+is_realtime_host=0
+
+case "$progname" in
+   calibre)	case "x$1" in
+                    'x-denver')   progname='calibreldbv' ;;
+                    'x-boulder')  progname='calibreldbv' ;;
+                    'x-gui')      progname='cgi_app' ;;
+                    'x-realtime') progname='wish'
+                                  progname_dir=${CALIBRE_HOME}/bin
+                                  args="${CALIBRE_HOME}/shared/pkgs/icv/tools/realtime/common/core_remote_realtime_interface.tcl $args"
+                                  is_realtime=1
+                                  ;;
+                    'x-realtimeHost') progname='wish'
+                                  progname_dir=${CALIBRE_HOME}/bin
+                                  args="${CALIBRE_HOME}/shared/pkgs/icv/tools/realtime/common/realtime_host.tcl $args"
+                                  is_realtime_host=1
+                                  ;;
+                esac
+                case "x$3" in
+                    'x-denver')  progname='calibreldbv' ;;
+                    'x-boulder') progname='calibreldbv' ;;
+                esac
+                ;;
+   calibredrv)  first_arg='-base' ; progname='calibrewb' ;;
+   calibrelv)   first_arg='-lv'   ; progname='calibrewb' ;;
+   calibremdpv) first_arg='-mdp'  ; progname='calibrewb' ;;
+   waiver_flow) first_arg='-waiver_flow' ; progname='calibre'
+                . $CALIBRE_HOME/bin/fdi_util
+                test -z "$MGC_VCO" && exit 1
+                VCO=$MGC_VCO ; export VCO
+                checkOAHomeSet
+                platformSetup
+                ;;
+   calibrecmpana)	MGC_CALIBRE_CUSTOMIZATION_FILE=$MGC_HOME/pkgs/icv/userware/En_na/dfm_ca_customize_ci && export MGC_CALIBRE_CUSTOMIZATION_FILE ;
+		  	MGC_RVE_DFM_USER_SCRIPT=$MGC_HOME/pkgs/icv/userware/En_na/dfm_ca_rve.tcl && export MGC_RVE_DFM_USER_SCRIPT ;
+			MGC_RVE_START_DFM_CONSOLE=1 && export MGC_RVE_START_DFM_CONSOLE ;
+			MGC_RVE_START_CMP=1 && export MGC_RVE_START_CMP ;
+			MGC_CALIBRE_CMP_ROOT=. && export MGC_CALIBRE_CMP_ROOT ;
+			first_arg='-base' ; progname='calibrewb' ;;
+   calumcdecrypt) unset LD_LIBRARY_PATH;
+                 export LD_LIBRARY_PATH=$MGC_HOME/pkgs/icv_lib/lib32:$MGC_HOME/pkgs/umc_libs/lib/lnx32;;
+
+esac
+test "$progname" = "calibrewb" && cmd_line_args="$CALIBREWB_CMD_LINE_ARGS" && this_pkg="icwb$PREF_VCO"
+test "$progname" = "calibremdf" && cmd_line_args="$CALIBREMDF_CMD_LINE_ARGS" && this_pkg="icmdf$PREF_VCO"
+test "$progname" = "calibrersl" && cmd_line_args="$CALIBREMDF_CMD_LINE_ARGS" && this_pkg="icmdf$PREF_VCO"
+test "$progname" = "calibreldbv" && cmd_line_args="$CALIBRELDBV_CMD_LINE_ARGS" && this_pkg="icv$PREF_VCO"
+
+if test $is_realtime -eq 0 -a $is_realtime_host -eq 0
+then
+  progname_dir=$CALIBRE_HOME/pkgs/$this_pkg/pvt
+fi
+
+if test ! -d "$progname_dir"
+then
+  echo "ERROR: Could not find or read directory: $progname_dir" >&2
+  exit 1
+fi
+
+echo "$@" $cmd_line_args | fgrep -e '-gui ' >/dev/null 2>&1
+if [ $? -ne 0 ]
+then
+  if echo " \"$@\" $cmd_line_args " | grep '[ 	\"]-3dstack[ 	\"]' >/dev/null 2>&1
+  then
+    if echo " \"$@\" $cmd_line_args " | egrep -v '[ 	\"]-ys|-dfm[ 	\"]' >/dev/null 2>&1
+    then
+        # do Project Melba processing; function terminates with an exec
+        # so does not return
+        run_melba "$@" $cmd_line_args
+    fi
+  fi
+fi
+
+if test "$progname" = "calibre"
+then
+   if test "x$1" = "x-thermal"
+   then
+     # thermal3dstack processing; function terminates with an exec
+     # so does not return
+     run_thermal "$@" $cmd_line_args
+   fi
+fi   
+
+# accumulate options, filter out -32/-64
+has_dfm=0
+has_dfmdb=0
+has_spice=0
+has_layout=0
+has_ys=0
+has_dfm_ys=0
+has_s2e=0
+has_hsd=0
+has_perc=0
+has_perc_rve=0
+has_soc=0
+has_gui=0
+has_lfd=0
+has_lvs=0
+has_xact=0
+has_xrc=0
+has_drc=0
+has_rve=0
+has_ye=0
+rve_dfm_rep_display_state=0 # to check if -rve -dfm -report specified
+has_rve_dfm_rep_display=0 #to check if -rve -dfm -report -display specified
+rve_drc_rep_display_state=0 # to check if -rve -drc -report specified
+has_rve_drc_rep_display=0 #to check if -rve -drc -report -display specified
+pga_batch_tcl_display_state=0 #to check if -pgadb -batch -tcl specified
+has_pga_batch_tcl_display=0 #to check if -pgadb -batch -tcl -display specified
+realtime_gui_processed=0
+first_arg_seen=0
+next_arg_spice_file=0
+next_arg_layout_file=0
+spice_file_name=''
+layout_file_name=''
+switch32=''
+use_xvfb=''
+ignore_lfd=0
+ignore_mbh=0
+ignore_async=0
+ignore_lsg=0
+add_args=''
+
+if echo "$@" | egrep -i 'other_switches_to_add|\-tvfarg|\-rve .*\-filter ' >/dev/null 2>&1
+then
+  APOST=\'
+fi
+
+
+if echo "$@" $cmd_line_args | fgrep -e '-lfd' >/dev/null 2>&1
+then
+  has_lfd=1
+
+  # -lfd was specified -- was -mbh, -async, or -lsg also specified?
+  if echo "$@" $cmd_line_args | fgrep -e '-mbh' >/dev/null 2>&1
+  then
+    # '-lfd -mbh' turns into '-dfm -hier -ys -autostart -lfd'
+    add_args='-dfm -hier -ys -autostart'
+    ignore_mbh=1
+  elif echo "$@" $cmd_line_args | fgrep -e '-async' >/dev/null 2>&1
+  then
+    # '-lfd -async' turns into '-dfm -hier -lfd -ys -autostart'
+    add_args='-dfm -hier -ys -autostart'
+    ignore_async=1
+  elif echo "$@" $cmd_line_args | fgrep -e '-lsg' >/dev/null 2>&1
+  then
+    # 'calibre -lfd -lsg' turns into 'calibrewb -lfd -a lsg'
+    if test "$progname" = 'calibre'
+    then
+      progname='calibrewb'
+      this_pkg="icwb$PREF_VCO"
+      progname_dir=$CALIBRE_HOME/pkgs/$this_pkg/pvt
+      lsg_add_args='-lfd -a lsg'
+      ignore_lsg=1
+      ignore_lfd=1
+    fi
+  fi
+fi
+
+## Check if -turbo has been used with "calibre -lfd -lsg". Store the number of cores in LSG_TURBO_COUNT if exists
+LSG_TURBO_COUNT=0
+LSG_TURBO_SEEN=0
+if test $ignore_lsg -eq 1
+then
+    last_arg_turbo=0
+    for arg in $first_arg $add_args "$@" $cmd_line_args
+        do
+        [ ${last_arg_turbo} -ne 0 ] && expr "${arg}" + "0" >/dev/null 2>&1 && LSG_TURBO_COUNT="${arg}"
+        last_arg_turbo=0
+        case $arg in
+            -turbo)
+                LSG_TURBO_COUNT=0
+                last_arg_turbo=1
+                LSG_TURBO_SEEN=1
+            ;;
+            *) ;;
+        esac
+    done
+fi
+
+for opt in $first_arg $add_args "$@" $cmd_line_args
+do
+  case "$opt" in
+    -32)  ;;
+    -64)  if test $progname = "cgi_app"
+          then
+            # -64 switch is meaningful to cgi_app, please preserve it
+            args="$args $opt"
+          fi ;;
+    -nodisplay)  use_xvfb=1 ;;
+    -lfd)   test $ignore_lfd   -ne 1 && args="$args -lfd" ;;
+    -mbh)   test $ignore_mbh   -ne 1 && args="$args -mbh" ;;
+    -async) test $ignore_async -ne 1 && args="$args -async" ;;
+    -turbo) if test $ignore_lsg   -eq 1 
+            then
+                if test $LSG_TURBO_COUNT -ne 0
+                then
+                    args="-threads $args"
+                fi
+            else 
+                args="$args -turbo"
+            fi
+        ;;
+    -lsg)   test $ignore_lsg   -ne 1 && args="$args -lsg" || args="$args $lsg_add_args"
+            if test $LSG_TURBO_SEEN -eq 0 && test $ignore_lsg -eq 1
+            then
+                args="-threads 1 $args"
+            fi
+        ;;
+    *) # build args for command line
+
+        ############ build args for Calibre batch reporting via Xvfb #############
+        if test "$progname" = "calibre"
+            then
+                if test $rve_dfm_rep_display_state -eq 0 -a $rve_drc_rep_display_state -eq 0
+                then
+                    if test "x$opt" = "x-rve"
+                    then
+                        rve_dfm_rep_display_state=1
+                        rve_drc_rep_display_state=1
+                    fi
+                elif test $rve_dfm_rep_display_state -eq 1 -a $rve_drc_rep_display_state -eq 1
+                then
+                    if test "x$opt" = "x-dfm"
+                    then
+                        rve_dfm_rep_display_state=2
+                    elif test "x$opt" = "x-drc"
+                    then
+                        rve_drc_rep_display_state=2
+                    fi
+                elif test $rve_dfm_rep_display_state -eq 2
+                then
+                    if test "x$opt" = "x-report"
+                    then
+                        rve_dfm_rep_display_state=3
+                        use_xvfb=1
+                    fi
+                elif test $rve_drc_rep_display_state -eq 2
+                then
+                    if test "x$opt" = "x-report"
+                    then
+                        rve_drc_rep_display_state=3
+                        use_xvfb=1
+                    fi
+                elif test $rve_dfm_rep_display_state -eq 3
+                then
+                    if test "x$opt" = "x-display"
+                    then
+                        has_rve_dfm_rep_display=1
+                        use_xvfb=''
+                    fi
+                elif test $rve_drc_rep_display_state -eq 3
+                then
+                    if test "x$opt" = "x-display"
+                    then
+                        has_rve_drc_rep_display=1
+                        use_xvfb=''
+                    fi
+                fi
+        elif test "$progname" = "mpower"
+            then
+                if test "x$opt" = "x-pgadb" -o "x$opt" = "x-tcl" -o "x$opt" = "x-batch"
+                then
+                    pga_batch_tcl_display_state=`expr $pga_batch_tcl_display_state + 1`
+                elif test "x$opt" = "x-display"
+                then 
+                    has_pga_batch_tcl_display=1
+                    use_xvfb=''
+                fi
+                if test $pga_batch_tcl_display_state -eq 3
+                then 
+                    use_xvfb=1
+                fi
+        fi
+
+        if test $is_realtime -eq 1 -a $realtime_gui_processed -eq 1
+        then
+          realtime_gui_processed=0
+          if test "$opt" = "0"
+          then
+            use_xvfb=1
+          fi
+        fi
+
+       ##### build args for Calibre batch reporting via Xvfb  #####
+
+        if test $first_arg_seen -eq 0 -a "x$opt" = "x-dfm"
+        then
+            has_dfm=1
+            # Ignore -dfm, we'll add it back later.
+        elif test "x$opt" = "x-ys"
+        then
+            has_ys=1
+            # see if we also have -dfm
+            if test $has_dfm -ne 0
+            then
+                has_dfm_ys=1
+                # Ignore -ys, we'll add it back later.
+            else
+                args="$args $APOST$opt$APOST";        # append option to args
+            fi
+        elif test "x$opt" = "x-dfmdb"
+        then
+            has_dfmdb=1
+            args="$args $APOST$opt$APOST";        # append option to args
+        elif test "x$opt" = "x-soc"
+        then
+            has_soc=1
+            args="$args $APOST$opt$APOST";        # append option to args
+        elif test "x$opt" = "x-s2e"
+        then
+            # if we see the -s2e switch we record that we have seen it, but remove
+            # it from the args to be passed to the application
+            has_s2e=1
+            extra_error_text='with the -s2e switch'
+        elif test "x$opt" = "x-hsd"
+        then
+            # if we see the -hsd switch we record that we have seen it, but remove
+            # it from the args to be passed to the application
+            has_hsd=1
+            extra_error_text='with the -hsd switch'
+        elif test "x$opt" = "x-rve"
+        then
+            args="$args $APOST$opt$APOST"
+            has_rve=1
+        elif test "x$opt" = "x-perc"
+        then
+            if test $has_rve -ne 0
+            then
+                has_perc_rve=1
+                args="$args $APOST$opt$APOST"
+            else
+                has_perc=1
+                args="$args $APOST$opt$APOST"
+            fi
+        elif test "x$opt" = "x-output_csv"
+        then
+            if test $has_perc_rve -ne 0
+            then
+                use_xvfb=1
+            fi
+            args="$args $APOST$opt$APOST"
+        elif test "x$opt" = "x-gui"
+        then
+            if test $is_realtime -eq 0 -a $is_realtime_host -eq 0
+            then
+              has_gui=1
+            else
+              args="$args $APOST$opt$APOST"; # preserve -gui 0/1 as is for -realtime & -realtimeHost
+              if test $is_realtime -eq 1
+              then 
+                realtime_gui_processed=1
+              fi
+            fi
+        elif test "x$opt" = "x-drc"
+        then
+            args="$args $APOST$opt$APOST"
+            has_drc=1
+        elif test "x$opt" = "x-lvs"
+        then
+            args="$args $APOST$opt$APOST"
+            has_lvs=1
+        elif test "x$opt" = "x-xact"
+        then
+            args="$args $APOST$opt$APOST"
+            has_xact=1
+        elif test "x$opt" = "x-pex"
+        then
+            args="$args $APOST$opt$APOST"
+            has_xrc=1
+        elif test "x$opt" = "x-ye"
+        then
+            args="$args $APOST$opt$APOST"
+            has_ye=1
+        elif test "x$opt" = "x-spice"
+        then
+            has_spice=1
+            next_arg_spice_file=1
+        elif test "x$opt" = "x-layout"
+        then
+            has_layout=1
+            next_arg_layout_file=1
+        elif test $next_arg_spice_file -ne 0
+        then
+            spice_file_name=$opt
+            next_arg_spice_file=0
+            args="$args -spice $spice_file_name"
+        elif test $next_arg_layout_file -ne 0
+        then
+            layout_file_name=$opt
+            next_arg_layout_file=0
+            args="$args -layout $layout_file_name"
+        elif test "x$opt" = "x-smo"
+        then
+          # The -smo option is now a no-op.
+          :
+	else
+	    args="$args $APOST$opt$APOST";        # append option to args
+        fi
+
+        first_arg_seen=1
+        ;;
+  esac
+done
+
+if test $has_hsd -ne 0
+then
+  progname=${progname}_v2t
+fi
+
+# DR1056987
+# Olympus sets MGLS_HOME to their own tree, which causes Calibre to fail when 
+# they subinvoke calibre -ds and MGLS versions are mismatched between products.
+# Unset MGLS_HOME so that MGC_HOME will be used instead.
+if test ! -z "$SDA_ROOT"
+then
+  unset MGLS_HOME
+fi
+
+# separate rve exec
+calibreProgName='calibre'
+rveProgName='calibrerve'
+
+if test "$progname" = "calibre"
+then
+  if test $has_rve -ne 0
+  then
+    progname=${rveProgName}
+  else
+    progname=${calibreProgName}
+  fi
+elif test $progname = "cgi_app"
+then 
+  if test $has_drc -ne 0
+  then
+    if test -z "$CALIBRE_ENABLE_NEW_CI_DRC"
+    then
+      # keep cgi_app
+      :
+    else
+      progname=${rveProgName}
+    fi
+  fi
+  if test $has_lvs -ne 0
+  then
+    if test -z "$CALIBRE_ENABLE_NEW_CI_LVS"
+    then
+      # keep cgi_app
+      :
+    else
+      progname=${rveProgName}
+    fi
+  fi
+  if test $has_perc -ne 0
+  then
+    if test -z "$CALIBRE_ENABLE_NEW_CI_PERC"
+    then
+      # keep cgi_app
+      :
+    else
+      progname=${rveProgName}
+    fi
+  fi
+  if test $has_xrc -ne 0
+  then
+      if ((test -z "$CALIBRE_ENABLE_NEW_CI_XRC") && (test -z "$CALIBRE_ENABLE_NEW_CI_PEX"))
+    then
+      # keep cgi_app
+      :
+    else
+      progname=${rveProgName}
+    fi
+  fi
+  if ((test $has_xact -ne 0) || (test $has_ye -ne 0))
+  then
+    progname=${rveProgName}
+  fi
+fi
+
+# generic path does not include any width (or other) suffix
+
+if test -n "${CALIBRE_LITHO_ENABLE_CUDA_RAW}" && ((test  "$progname" = "calibre") || (test  "$progname" = "calibrewb"))
+then
+  fullpath=$progname_dir/${progname}_cuda
+else
+    fullpath=$progname_dir/${progname}
+fi
+
+if test -x "$fullpath"
+then
+  # life is good, path is found
+  :
+else
+  # fullpath does not resolve
+  fullpath=''
+fi
+
+if test -z "$fullpath"
+then
+  echo "ERROR: Could not invoke $progname_dir/$progname $extra_error_text" >&2
+  exit 1
+fi
+
+if test ! -z "$CALIBRE_ENGR_PRELUDE"
+then
+  fullpath="$CALIBRE_ENGR_PRELUDE $fullpath"
+fi
+
+if test $has_dfm -ne 0
+then
+    if test $has_dfm_ys -ne 0
+    then
+        # -dfm -ys: Prepend -dfm, -dfm_ys, and -dfmdb_namefile options.
+        # (Must be prepended in case of -ys -exec args...)
+
+        dfmdb_args=''
+
+        # Prepend -dfmdb_namefile unless -dfmdb is specified.
+        if test $has_dfmdb -eq 0
+        then
+            tmp_db_name_file="$MGC_TMPDIR/$$.db_file_name"
+            rm -f "$tmp_db_name_file"
+            dfmdb_args="-dfmdb_namefile $tmp_db_name_file"
+        fi
+
+        save_args="$args"
+        args="-dfm -dfm_ys $dfmdb_args $args"
+
+        # Run -dfm half of -dfm -ys.
+        test ! -z "$CALIBRE_SHOW_INVOCATION" && echo "## Invocation line after any modifications: $fullpath $args" >&2
+        CALIBRE_CMD_LINE="$fullpath $args"
+        export CALIBRE_CMD_LINE
+        test -z "$CALIBRE_PREPROCESS_ONLY" && eval $fullpath $args
+        dfm_exit=$?
+
+        # Retrieve name of DFMDB if not on original command line.
+        if test $has_dfmdb -eq 0
+        then
+            test $dfm_exit -eq 0 && db_file_name=`cat "$tmp_db_name_file"`
+            rm -f "$tmp_db_name_file"
+            dfmdb_args="-dfmdb $db_file_name"
+        fi
+
+        if test $dfm_exit -ne 0
+        then
+            # exit if -dfm run failed
+            exit $dfm_exit
+        fi
+
+        # Build args for -ys run.  Must prepend in case of -ys -exec.
+        args="-ys -dfm_ys $dfmdb_args $save_args"
+    else
+        # Restore the -dfm.
+        args="-dfm $args"
+    fi
+fi
+
+########### Running Xvfb for Calibre batch reporting ###################
+XDISPLAY=0
+
+if test -n "$use_xvfb"
+then
+    # checking permissions of /tmp/.X11-*
+    if test -d "/tmp/.X11-unix" -a ! -w "/tmp/.X11-unix"
+    then
+        if test -d "/tmp/.X11-pipe" -a ! -w "/tmp/.X11-pipe"
+        then
+            echo "ERROR: /tmp/.X11-unix and /tmp/.X11-pipe directories' permissions must be set to 1777. Please contact your system administrator. " >&2
+            exit 1
+        else
+            echo "ERROR: /tmp/.X11-unix directory permissions must be set to 1777. Please contact your system administrator. " >&2
+          exit 1
+        fi
+    fi
+
+    #getting used sockets list
+    if test "$MGC_VCO" = 'ss5' -o "$MGC_VCO" = 'so5'
+    then
+        socket_list=`netstat -a | awk '/\*.[0-9]+/ { split($1, l, "."); if(l[2]>5999 && l[2]<65536) {print l[2]}}' | sort -n | uniq`
+    elif test "$MGC_VCO" = 'irv' -o "$MGC_VCO" = 'ira' -o "$MGC_VCO" = 'ir6'
+    then
+        socket_list=`netstat -a | awk '/\*.[0-9]+/ { split($4, l, "."); if(l[2]>5999 && l[2]<65536) {print l[2]}}' | sort -n | uniq`
+    else
+        socket_list=`netstat -l | awk '/*:[0-9]+/ { split($4, l, ":"); if(l[2]>5999 && l[2]<65536) {print l[2]}}' | sort -n | uniq`
+    fi
+
+    freeDisplaySearching=0
+    while [ $freeDisplaySearching -le 100 ]; do
+        #finding out free socket
+        free_socket=`cat /dev/urandom | od -A n -N 2 -t u2`
+        while [ $free_socket -gt 6000 -a $free_socket -lt 65536 ]; do
+            socket=`echo $socket_list | egrep " $free_socket( |$)"`
+            XDISPLAY=`expr $free_socket - 6000`
+
+            if test -z "$socket" -a ! -f "/tmp/.X$XDISPLAY-lock"
+            then
+                break
+            fi
+
+            free_socket=`cat /dev/urandom | od -A n -N 2 -t u2`
+            XDISPLAY=0
+        done
+
+        if test $XDISPLAY -eq 0
+        then
+            freeDisplaySearching=`expr $freeDisplaySearching + 1`
+        else
+            if test ! -z "$XAUTHORITY"
+            then
+                unset XAUTHORITY
+            fi
+
+            tmpfile=`mktemp 2>/dev/null`
+            if test $? -ne 0
+            then
+                tmpfile="/tmp/tmp.`date +%s`"
+            fi
+
+            if test ! -d /usr/X11R6; then 
+                if test ! -d /usr/share/X11/fonts/misc; then
+                    echo "ERROR: Cannot locate required fonts in /usr/share/X11/fonts/misc." >&2
+                    echo "       Required package xorg-x11-fonts-misc is missing. Please contact your system administrator." >&2
+                    exit 1
+                fi
+            else
+                if test ! -d /usr/share/X11/fonts/misc && \
+                test ! -d /usr/share/fonts/misc; then
+                    echo "ERROR: Cannot locate required fonts in /usr/share/fonts/misc or /usr/share/X11/fonts/misc." >&2
+                    echo "       Required package xorg-x11-fonts-misc is missing. Please contact your system administrator." >&2
+                    exit 1
+                fi
+            fi
+
+            # RHEL 6 provides the fonts in a different location
+            if test ! -d /usr/X11R6
+            then
+                test -d /usr/share/X11/fonts/misc \
+                && DEFAULTFONTPATH="$DEFAULTFONTPATH -fp /usr/share/X11/fonts/misc" \
+                && export DEFAULTFONTPATH
+            fi
+            test -d /usr/share/fonts/misc && \
+            DEFAULTFONTPATH="$DEFAULTFONTPATH -fp /usr/share/fonts/misc" && \
+            export DEFAULTFONTPATH
+
+            if test -n "$CALIBRE_ENABLE_RVE_DEBUG"; then
+                echo "DEBUG: Font path: $DEFAULTFONTPATH"
+            fi
+            # Invoking Xvfb.  
+            # Select visual class id for the root window to TrueColor=4 with 24 bits for colors
+            $CALIBRE_HOME/pkgs/icv_xvfb_comp/bin/calibre_Xvfb :$XDISPLAY -ac -cc -4 -screen 0 3840x3072x24 -sp $CALIBRE_HOME/pkgs/icv_xvfb_comp/xserver $DEFAULTFONTPATH >$tmpfile 2>&1 &
+
+            if test -f "$tmpfile"
+            then
+                if test "`cat $tmpfile|grep \"Server is already active for display [0-9]\+\" \"$tmpfile\"`"
+                then
+                    freeDisplaySearching=`expr $freeDisplaySearching + 1`
+                else
+                    use_display=1
+                    if test $is_realtime -eq 1
+                    then
+                        HOST=
+                        which xdpyinfo >$tmpfile 2>&1
+                        if test $? -eq 0
+                        then
+                            xdpyinfo -display :$XDISPLAY >$tmpfile 2>&1
+                            if test $? -ne 0
+                            then
+#                               echo "xdpyinfo failed for display :$XDISPLAY"
+                                HOST=`hostname`
+                                host $HOST >> $tmpfile
+                                if [ $? -ne 0 ]; then
+                                    HOST=
+                                fi
+                                xdpyinfo -display $HOST:$XDISPLAY >$tmpfile 2>&1
+                                if test $? -ne 0
+                                then
+                                    use_display=0
+#                                    echo "xdpyinfo failed for display $HOST:$XDISPLAY"
+                                    kill_xvfb $XDISPLAY
+#                                 else
+#                                     echo "xdpyinfo succeeded for display $HOST:$XDISPLAY"
+                                fi
+#                             else
+#                                 echo "xdpyinfo succeeded for display :$XDISPLAY"
+                            fi
+#                         else
+#                             echo "xdpyinfo not found, skipping validity check for display :$XDISPLAY"
+                        fi
+                    fi
+                    if test $use_display -eq 0
+                    then
+                        freeDisplaySearching=`expr $freeDisplaySearching + 1`
+                    else
+                        # exporting DISPLAY for Xvfb
+                        if test ! -z "$DISPLAY"
+                        then
+                            unset DISPLAY
+                        fi
+
+                        if test $XDISPLAY -ne 0
+                        then
+                            if test $is_realtime -ne 1
+                            then
+                                # For localhost or machine with no resolvable addresses we are better off to not specify the hostname at all in DISPLAY.
+                                HOST=`hostname`
+                                host $HOST >> $tmpfile
+                                if [ $? -ne 0 ]; then
+                                    HOST=
+                                fi
+                            fi
+                            DISPLAY=$HOST:$XDISPLAY
+                            if test -n "$CALIBRE_ENABLE_RVE_DEBUG"; then
+                                echo "DEBUG: Generating reports using virtual display $DISPLAY"
+                            fi
+                            export DISPLAY
+                        else
+                            echo "ERROR: Could not popup report windows on virtual display." >&2
+                        fi
+
+                        args="$args"
+                        break
+                    fi
+                fi
+            else
+                break
+            fi
+        fi
+    done
+fi
+########### End of section Running Xvfb for Calibre batch reporting ###########
+
+if test $has_gui -ne 0
+then
+    args="-gui $args"
+fi
+
+if test "$progname" = "mpower"
+then
+    args="-pga $args "
+fi
+
+(
+if test ! -z "$CALIBRE_SHOW_INVOCATION"
+then
+  echo '## Invocation line after any modifications:'
+  echo $fullpath $args
+  echo '## '
+fi
+) >&2
+
+vco_pcovg=`echo $CALIBRE_HOME | sed -n '/pcovg/ p'`
+if test ! -z "$vco_pcovg"
+then
+   if test -z "$PURECOVOPTIONS" && test -z "$PURECOV_MODE"
+   then
+      echo "ABORTING: PURECOVOPTIONS or PURECOV_MODE should be set!"
+      exit 1
+   fi
+fi
+
+if test -z "$CALIBRE_PREPROCESS_ONLY"
+then
+  if test -z "$APOST"
+  then
+    #### If has_ys or has_dfm or has_dfmdb or has_perc is set do not execute run_columbia
+    if test  \( $has_ys -ne 1 -a $has_dfm -ne 1 -a $has_dfmdb -ne 1 -a $has_perc -ne 1 \) -a \( ! -z "$PEX_ENGINE_FAST_ASIC" -o $has_soc -ne 0 \)
+    then
+        run_columbia $fullpath $args
+    else
+        if test \( $has_rve_dfm_rep_display -eq 0 -a $rve_dfm_rep_display_state -eq 3 \) -o \( $has_rve_drc_rep_display -eq 0 -a $rve_drc_rep_display_state -eq 3 \) -o \( $has_pga_batch_tcl_display -eq 0 -a $pga_batch_tcl_display_state -eq 3 \) -o -n "$use_xvfb"
+        then
+            #### Need to return to this script after Calibre execution to kill running Xvfb ####
+            CALIBRE_CMD_LINE="$fullpath $args"
+            export CALIBRE_CMD_LINE
+            eval $fullpath $args
+            cal_exit=$?
+        else
+            CALIBRE_CMD_LINE="$fullpath $args"
+            export CALIBRE_CMD_LINE
+            exec $fullpath $args
+        fi
+    fi
+  else
+    #### If has_ys or has_dfm or has_dfmdb or has_perc is set do not execute run_columbia
+    if test  \( $has_ys -ne 1 -a $has_dfm -ne 1 -a $has_dfmdb -ne 1 -a $has_perc -ne 1 \) -a \( ! -z "$PEX_ENGINE_FAST_ASIC" -o $has_soc -ne 0 \)
+    then
+        run_columbia $fullpath $args
+    else
+        CALIBRE_CMD_LINE="$fullpath $args"
+        export CALIBRE_CMD_LINE
+        eval $fullpath $args
+        cal_exit=$?
+    fi
+  fi
+fi
+
+################# Killing Xvfb #################
+if test -n "$use_xvfb"
+then 
+    kill_xvfb $XDISPLAY
+fi
+######## End of section Killing Xvfb #########
+
+exit $cal_exit

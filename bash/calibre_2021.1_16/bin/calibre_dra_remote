@@ -1,0 +1,179 @@
+#!/bin/bash
+#************************************************************************CPY10*#
+#*   Copyright Mentor Graphics Corporation 2005-2018                     CPY11*#
+#*                      All Rights Reserved.                             CPY12*#
+#*                                                                       CPY13*#
+#*   THIS WORK CONTAINS TRADE SECRET AND PROPRIETARY INFORMATION         CPY14*#
+#*   WHICH IS THE PROPERTY OF MENTOR GRAPHICS CORPORATION OR ITS         CPY15*#
+#*   LICENSORS AND IS SUBJECT TO LICENSE TERMS.                          CPY16*#
+#************************************************************************CPY17*#
+#
+# This will parse the given jobLog with Calibre LogView and return Dashboard URL
+# where you can find the charts. Dashboard server will be up and running until you shut it down
+# Note that jobLog and CalibreMonitorHostLog files should be in the same directory
+#
+script_version="0.1"
+
+# set to 1 to print out the debug messages
+DEBUG=0
+
+# Script settings
+trap ctrl_c INT
+LB='\033[1;34m' # Light blue
+NC='\033[0m'    # No color
+
+# Help
+usage() {
+   echo "Usage: calibre_dra_remote -master <master_host_name> -ports <control_port>:<data_port> <additional_option>..."
+   echo "Start Calbre remote then attempt to connect to calibre master"
+   echo
+   echo "    -master <host_name>               : host name or ip address of Calibre master"
+   echo "    -ports <control_port>:<data_port> : control port and data port of Calibre master"
+   echo "    <additional_options>              : additional options to start Calibre remote"
+   echo "    -h                                : print this help message"
+}
+
+# Output message for debugging purpose
+debug() {
+   if [ $DEBUG == 1 ]; then
+      echo "DEBUG: $1"
+   fi
+}
+
+ctrl_c() {
+   echo   
+   echo "Script has been stopped by the user."
+   exit 0
+}
+
+check_master_port() {
+pyargs=$@ $PYTHON - <<END
+import socket
+import os
+(master_host, ctrl_port_str) = os.environ['pyargs'].split( ' ' )
+ctrl_port = int( ctrl_port_str )
+s=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+try:
+    s.connect( (master_host, ctrl_port) )
+    s.shutdown(2)
+    print(1)
+except:
+    print(0)
+END
+}
+
+check_cpu_adjustable() {
+pyargs=$@ $PYTHON - <<END
+import socket
+import os
+(master_host, ctrl_port_str) = os.environ['pyargs'].split( ' ' )
+ctrl_port = int( ctrl_port_str )
+s = socket.socket( socket.AF_INET, socket.SOCK_STREAM )
+s.connect((master_host, ctrl_port))
+message = 'report utility\\n'
+s.sendall( message.encode( 'ascii' ) )
+s.shutdown( socket.SHUT_WR )
+while True:
+    data = s.recv(512)
+    datastr = data.decode( 'ascii' )
+    if datastr[:6] == '<ERROR':
+        print(0)
+        break
+    else:
+        print(1)
+        break
+END
+}
+
+# Print Copyright
+echo "//  calibre_dra_remote script v$script_version"
+echo "//                   Copyright Siemens 1996-2020"
+echo "//                       All Rights Reserved."
+echo "//   THIS WORK CONTAINS TRADE SECRET AND PROPRIETARY INFORMATION"
+echo "//      WHICH IS THE PROPERTY OF MENTOR GRAPHICS CORPORATION"
+echo "//        OR ITS LICENSORS AND IS SUBJECT TO LICENSE TERMS."
+echo "//"
+echo "//  The registered trademark Linux is used pursuant to a sublicense from LMI, the"
+echo "//  exclusive licensee of Linus Torvalds, owner of the mark on a world-wide basis."
+echo "//"
+echo "//  Mentor Graphics software executing under x86-64 Linux"
+echo "//"
+
+# Automatically define MGC_HOME to root dir of current script if needed, so that it's easier to launch with ssh
+if [[ ! $MGC_HOME ]]
+then
+    SCRIPT=`realpath $0`                     # $MGC_HOME/pkgs/icv_calcm.aoi/bin/calibre_dra_remote
+    SCRIPTPATH1=`dirname $SCRIPT`            # $MGC_HOME/pkgs/icv_calcm.aoi/bin
+    SCRIPTPATH2=`dirname $SCRIPTPATH1`       # $MGC_HOME/pkgs/icv_calcm.aoi
+    SCRIPTPATH3=`dirname $SCRIPTPATH2`       # $MGC_HOME/pkgs
+    export MGC_HOME=`dirname $SCRIPTPATH3`
+    echo "// DRA: MGC_HOME set automatically to $MGC_HOME"
+fi
+
+# Set VCO
+VCO=$($MGC_HOME/bin/calibre_vco)
+debug "VCO         : $VCO"
+
+if [[ $1 = "-h" ]]
+then
+    usage
+    exit 0
+fi
+
+if [[ $# < 4 ]]
+then
+    usage
+    exit 1
+fi
+
+for i in {1,2}
+do
+    if [[ $1 = "-master" ]]
+    then
+        master_host=$2
+        shift 2
+    elif [[ $1 = "-ports" ]]
+    then
+        ports_arg=$2
+        shift 2
+    fi
+done
+
+if [[ $master_host = '' || $ports_arg = '' ]]
+then
+    usage
+    exit 1
+fi
+
+IFS=':' read -ra ports <<< "$ports_arg"
+ctrl_port=${ports[0]}
+data_port=${ports[1]}
+
+PYTHON=$MGC_HOME/pkgs/icv_python/asp/bin/python3
+
+for i in {1,2,3}
+do
+    ctrl_port_open=$(check_master_port ${master_host} ${ctrl_port})
+    if [[ $ctrl_port_open = '1' ]]
+    then
+        break
+    fi
+    sleep 1
+done
+
+if [[ $ctrl_port_open = '0' ]]
+then
+    debug "// DRA: Connecting to master $master_host as an initial remote."
+    exec $MGC_HOME/bin/calibre -mtflex $master_host:$data_port $@
+fi
+
+while :
+do
+    cpu_adjustable=$(check_cpu_adjustable ${master_host} ${ctrl_port})
+    if [[ $cpu_adjustable = "1" ]]
+    then
+        rm -rf $tmpfile
+        exec $MGC_HOME/bin/calibre -mtflex $master_host:$data_port $@
+    fi
+    sleep 5
+done

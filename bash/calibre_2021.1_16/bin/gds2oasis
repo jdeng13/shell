@@ -1,0 +1,307 @@
+#!/bin/sh
+# gds2oasis v1 - contact: iit_tme@mentor.com
+#
+# This utility converts GDS layouts to the OASIS format using Calibre DESIGNrev
+# It can also optimize existing OASIS files to utilize CBLOCKs and strict mode
+# 
+#\
+if [ ! -d "$MGC_HOME" ]; then echo "Error: \$MGC_HOME not set" ; exit; fi
+#\
+exec $MGC_HOME/bin/calibredrv -shell -s $0 -gds2oasis -- $@
+
+##################################################################################
+##                                                                              ##
+## Copyright Mentor Graphics Corporation 2018 All Rights Reserved.              ##
+## THIS WORK CONTAINS TRADE SECRET AND PROPRIETARY INFORMATION                  ##
+## WHICH IS THE PROPERTY OF MENTOR GRAPHICS CORPORATION OR ITS                  ##
+## LICENSORS AND IS SUBJECT TO LICENSE TERMS.                                   ##
+##                                                                              ##
+## DISCLAIMER OF WARRANTY:  Unless otherwise agreed in writing,                 ##
+## Mentor Graphics software and associated files are provided "as is"           ##
+## and without warranty.  Mentor Graphics has no obligation to support          ##
+## or otherwise maintain software.  Mentor Graphics makes no warranties,        ##
+## express or implied with respect to software including any warranty           ##
+## of merchantability or fitness for a particular purpose.                      ##
+##                                                                              ##
+## LIMITATION OF LIABILITY: Mentor Graphics is not liable for any property      ##
+## damage, personal injury, loss of profits, interruption of business, or for   ##
+## any other special, consequential or incidental damages, however caused,      ##
+## whether for breach of warranty, contract, tort (including negligence),       ##
+## strict liability or otherwise. In no event shall Mentor Graphics'            ##
+## liability exceed the amount paid for the product giving rise to the claim.   ##
+##                                                                              ##
+##################################################################################
+
+proc showHelp {} {
+	puts ""
+	puts "gds2oasis: This utility converts GDS layouts to the OASIS format using Calibre DESIGNrev. It can also convert existing OASIS files to utilize CBLOCKs and strict mode."
+	puts ""
+	puts {Usage 1: gds2oasis <input layout> <output layout> [options]}
+	puts {Usage 2: gds2oasis -allin <input layout/directory> [<input layout/directory> ... ] [options]}
+	puts {Usage 3: gds2oasis <input layout/directory> [options]}
+	puts ""
+	puts "Supported options:"
+	puts "  -allin                   treat all arguments as inputs"
+	puts "                             arguments can be layouts or directories"
+	puts "                             layouts will be automatically renamed"
+	puts "  -outdir <directory>      used with -allin to specify output directory"
+	puts "                             default is current directory"
+	puts "  -overwrite               overwrite existing files"
+	puts "  -verbose                 print out layout statistics when loading"
+	puts "  -no_paths                convert paths to polygons"
+	puts "  -no_properties           do not load properties"
+	puts "  -no_dtexpand             do not expand datatypes"
+	puts "  -no_cblocks              do not write CBLOCKs"
+	puts "  -no_strictmode           do not create strict mode tables"
+	puts "  -ignore_gds_boxes        ignore GDS boxes"
+	puts "  -help/-usage             display this help message"
+	exit
+}
+
+proc main argv {
+	package require cmdline
+	global params
+	set INPUT_OPTIONS { {usage} {allin} {outdir.arg .} {overwrite} {verbose} \ 
+			{translateboxrecords} {ignoregdsboxes} {preservepaths} \ 
+			{nopaths} {nocblocks} {nostrictmode} {noproperties} {nodtexpand} \
+			{noenforce} {gds2oasis} {nocopyright} {noverbose} }
+
+	set argv [cleanArgv $argv]
+	if {[lsearch $argv {-help}] > -1} {
+		showHelp
+	}
+	set argv [reorganizeArgv $argv $INPUT_OPTIONS]
+	array set params [::cmdline::getKnownOptions argv $INPUT_OPTIONS]
+	if {$params(usage) || [llength $argv] == 0} {
+		showHelp
+	}
+	foreach currentArg $argv {
+		if {[regexp {^-} $currentArg]} {
+			puts ""
+			puts "Error: $currentArg is not recognized"
+			showHelp
+		}
+	}
+
+	set convertedLayouts {}
+	set unconvertedLayouts {}
+	set inputFiles {}
+	set outputFiles {}
+
+	puts ""
+	if {!$params(allin)} {
+		if {[llength $argv] == 1} {
+			puts "Warning: assuming -allin because only one input was specified"
+			set params(allin) 1
+		} elseif {[llength $argv] != 2} {
+			puts "Error: -allin is needed if only providing input files"
+			exit
+		} else {
+			if {[file isfile [lindex $argv 0]]} {
+				set inputFiles [lindex $argv 0]
+			} else {
+				puts "Error: [lindex $argv 0] is not a file"
+				exit
+			}
+			if {[regexp -nocase {\.gz$|\.z$} [lindex $argv 1]]} {
+				puts "Error: The output file cannot be zipped; by default, the output will have CBLOCK compression"
+				exit
+			} 
+			set outputFiles [lindex $argv 1]
+			set params(outdir) [file dirname $outputFiles]
+		}
+	}
+	if {$params(allin)} {
+		foreach currentArg $argv {
+			if {[file isdirectory $currentArg]} {
+				if {[catch {glob -directory $currentArg -types f *} globList]} {
+					lappend unconvertedLayouts "$currentArg \[empty directory\]"
+				} else {
+					set inputFiles [concat $inputFiles $globList]
+				}
+			} elseif {[file isfile $currentArg]} {
+				lappend inputFiles $currentArg
+			} else {
+				lappend unconvertedLayouts "$currentArg \[does not exist\]"
+			}
+		}
+
+		foreach currentInput $inputFiles {
+			lappend outputFiles $params(outdir)/[file tail [regsub -nocase {\.gds$|\.gds\.gz$|\.oasis$|\.oasis\.gz$|\.oas\.gz$|\.oas$|$} $currentInput .oas]]
+		}
+	} 
+
+	# check that output directory exists and is writable
+	if {![file isdirectory $params(outdir)]} {
+		if {[catch {file mkdir $params(outdir)}]} {
+			puts "Error: Output directory could not be created"
+			exit
+		}
+	}
+	if {![file writable $params(outdir)]} {
+		puts "Error: Output directory does not have write permissions"
+		exit
+	}
+
+	# set loading and export options 
+	set loadingOptions [setLoadingOptions]
+	set exportOptions [setExportOptions]
+	
+	# iterate through each layout
+	foreach currentInput $inputFiles currentOutput $outputFiles {
+		puts "Converting $currentInput to $currentOutput..."
+		puts "  Loading $currentInput"
+		if {[catch {eval layout create $currentInput $loadingOptions} L]} {
+			puts "  $L"
+			lappend unconvertedLayouts "$currentInput \[could not be loaded\]"
+			continue
+		} 
+		if {!$params(overwrite) && [file isfile $currentOutput]} {
+			puts "  Warning: $currentOutput exists; creating [set currentOutput [renameUnique $currentOutput]] instead"
+		}
+		
+		puts -nonewline "  "; flush stdout
+		if {[catch {eval $L oasisout $currentOutput $exportOptions} errorMessage]} {
+			lappend unconvertedLayouts "$currentInput \[could not be converted\]"
+			continue
+		}
+		lappend convertedLayouts $currentInput
+		layout delete $L
+	}
+
+	if {[llength $convertedLayouts] > 1} {
+		puts ""	
+		puts "Total number of layouts converted: [llength $convertedLayouts]"
+		if {$params(outdir) == "."} {
+			puts "Layouts are in current directory"
+		} else {
+			puts "Layouts are in directory: [file normalize $params(outdir)]"
+		}
+	}
+	if {[llength $unconvertedLayouts]} {
+		puts ""
+		puts "Total number of layouts not converted: [llength $unconvertedLayouts]"
+		if {[file writable .]} {
+			set outputLog [renameUnique gds2oasis_unconverted.log]
+			puts "Please see $outputLog to see which files could not be converted"
+			set outputLog [open $outputLog w]
+		} else {
+			set outputLog stdout
+		}
+		puts $outputLog [join $unconvertedLayouts \n]
+		close $outputLog
+	}
+}
+
+proc cleanArgv {argv} {
+# change case of input arguments (starting with -) to lowercase and strips all underscores
+	for {set i 0} {$i < [llength $argv]} {incr i} {
+		if {[regexp {^-} [lindex $argv $i]]} {
+			set argv [lreplace $argv $i $i [string tolower [string map {{_} {}} [lindex $argv $i]]]]
+		}
+	}
+
+	return $argv
+}
+
+proc reorganizeArgv {argv supportedOptions} {
+# move switches and switch arguments to beginning of argv list
+	foreach supportedOption $supportedOptions {
+		if {[regexp {(.+)\.arg$} [lindex $supportedOption 0] dummyVar argName]} {
+			set index [lsearch $argv -$argName]
+			if {$index > -1} {
+				lappend argv_args [list [lindex $argv $index] [lindex $argv [expr {$index+1}]]]
+				set argv [lreplace $argv $index [expr {$index+1}]]
+			}
+		}
+	}
+	
+	set argv_switches {}
+	for {set i 0} {$i < [llength $argv]} {incr i} {
+		if {[regexp {^-} [lindex $argv $i]]} {
+			lappend argv_switches [lindex $argv $i]
+			set argv [lreplace $argv $i $i]
+			incr i -1
+		}
+	}
+	
+	set argv [join [lappend argv_args $argv_switches $argv]]
+	return $argv
+}
+
+proc setLoadingOptions {} {
+# create loading options string based on input parameters
+	global params
+	set loadingOptions ""
+	if {$params(translateboxrecords) && $params(ignoregdsboxes)} {
+		puts "Error: -translate_box_records and -ignore_gds_boxes cannot both be set"
+		exit
+	}
+	if {$params(preservepaths) && $params(nopaths)} {
+		puts "Error: -preserve_paths and -no_paths cannot both be set"
+		exit
+	}
+	
+	if {$params(noenforce)} {
+		puts "Warning: -no_enforce is not necessary; it is the default behavior"
+	}
+	if {$params(translateboxrecords)} {
+		puts "Warning: -translate_box_records is not necessary; it is the default behavior"
+	}
+	if {$params(ignoregdsboxes)} {
+		set loadingOptions "$loadingOptions -ignoreGdsBoxes"
+	}
+	
+	if {!$params(nopaths)} {
+		if {$params(preservepaths)} {
+			puts "Warning: -preserve_paths is not necessary; it is the default behavior"
+		}
+		set loadingOptions "$loadingOptions -preservePaths"
+	} 
+	if {!$params(noproperties)} {
+		set loadingOptions "$loadingOptions -preserveProperties"
+	}
+	if {!$params(nodtexpand)} {
+		set loadingOptions "$loadingOptions -dtExpand"
+	}
+	if {!$params(verbose)} {
+		set loadingOptions "$loadingOptions -noReport"
+	}
+
+	return $loadingOptions
+}
+
+proc setExportOptions {} {
+# create export options string based on input parameters
+	global params
+	set exportOptions ""
+	if {!$params(nocblocks)} {
+		set exportOptions "$exportOptions -cBlocks"
+	} else {
+		puts "Warning: -no_cblocks set; using CBLOCKs is recommended"
+	}
+	if {!$params(nostrictmode)} {
+		set exportOptions "$exportOptions -strictMode"
+	} else {
+		puts "Warning: -no_strictmode set; using strict mode is recommended"
+	}
+
+	return $exportOptions
+}
+
+proc renameUnique {fileName} {
+# increments filename until filename does not exist
+	set i 0
+	set fileRootname [file rootname $fileName]
+	set fileExtension [file extension $fileName]
+	while {[file exists $fileName]} {
+		incr i
+		set fileName ${fileRootname}_$i$fileExtension
+	}
+
+	return $fileName
+}
+
+
+main $argv
+exit

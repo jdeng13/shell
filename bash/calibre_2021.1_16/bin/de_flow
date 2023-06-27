@@ -1,0 +1,22 @@
+#!/bin/bash
+
+DE_SCRIPT_DIR=$MGC_HOME/pkgs/icv/userware/En_na/cgi/de/
+tclsh=$MGC_HOME/bin/tclsh
+
+. $DE_SCRIPT_DIR/de_utils.sh
+
+
+#get arguments and check if they are vaild
+runset=$1
+checkFile $runset
+bannerText=$2
+batch=$3
+
+logmark DE FLOW STARTED
+
+$tclsh $DE_SCRIPT_DIR/dfm_explorer_flow.tcl $runset "$bannerText" $batch
+check_exit $? "FAILURE: DR flow" 1 
+
+logmark DE FLOW COMPLETED
+
+exit 0

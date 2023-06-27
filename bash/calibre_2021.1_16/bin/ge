@@ -1,0 +1,143 @@
+#!/bin/sh
+# Copyright Mentor Graphics Corporation 2002
+#
+#    All Rights Reserved.
+#
+# THIS WORK CONTAINS TRADE SECRET
+# AND PROPRIETARY INFORMATION WHICH ARE THE
+# PROPERTY OF MENTOR GRAPHICS
+# CORPORATION OR ITS LICENSORS AND IS
+# SUBJECT TO LICENSE TERMS. 
+
+# GENERIC GENIE PROGRAM STARTUP TEMPLATE
+#
+# NOT released to customers.
+# Each division/product should generate their own startup template.
+
+# Optional width arg := [ 32 | 64 ]
+# Default = 32 => no extension on executable root name
+#
+#  NOTE!!! -64 MUST be the FIRST arg given!!!
+#
+WIDTH=""
+if [ $# -ge 1 ]; then
+   case $1 in
+	-32) ;;
+	-64) WIDTH="_64" ;;
+	-h) echo "Usage: ge [-32 | -64] [genie args]" ;;
+	esac
+fi
+
+# Also support an environment variable setting for executable width
+MGC_PREFER_64=${MGC_PREFER_64}
+case $MGC_PREFER_64 in
+	?*) WIDTH="_64" ;;
+esac
+
+MGC_HOME=${MGC_HOME-`expr $0 : "\(.*\)/bin/.*"`}
+
+# Set the path to include userware directories from packages we depend on
+#GE__PATH8=${GE__PATH8-"${PATH}:$MGC_HOME/lib"}
+EL_LIBRARY_PATH=${EL_LIBRARY_PATH}:"$MGC_HOME/lib"
+
+# pick up help files from various packages
+EL_HELP_PATH=${EL_HELP_PATH-"$MGC_HOME/pkgs/ele_any/help"}
+
+# Set the environment variable used by the final script to locate
+# the executable
+prog=${GE8-${MGC_HOME}/pkgs/ele/.bin/ge_10.4$WIDTH}
+
+export MGC_HOME EL_LIBRARY_PATH EL_HELP_PATH
+
+# Code taken from get_mgc_vco_sg from $MGC_HOME/bin
+
+if [ "$OS" = "Windows_NT" ]
+then
+	if [ "$PROCESSOR_ARCHITECTURE" = "x86" ]
+	then
+		VCO=ixn;
+	else
+		VCO=dan;
+	fi
+	exit 0;
+fi
+
+for dir in /bin /usr/bin /sys5.3/bin ; do
+   if [ -f ${dir}/uname ] ; then
+        UNAME=`${dir}/uname`
+        case "$UNAME" in
+                AIX*) VCO=ira
+					  ;;
+                HP-UX)
+                   UNAMER=`${dir}/uname -r`
+                   case "$UNAMER" in
+                       *.10.20) VCO=hpx 
+							    ;;
+                         *)  VCO=hpu 
+						     ;;
+                   esac
+                   ;;
+                Linux) VCO=ixl
+					   ;;
+                SunOS)
+                   UNAMER=`${dir}/uname -r`
+                   case "$UNAMER" in
+                       5.6)    VCO=ss6
+					           ;;
+                         *)    VCO=ss5
+						       ;;
+                   esac
+                   ;;
+        esac
+    fi
+done
+
+# DR 317483 : ever since ge began to be linked with libolh.so 
+# export the LD_LIBRARY_PATH or SHLIB_PATH as the case maybe 
+
+case $VCO in
+    "hpu")
+        SHLIB_PATH=$MGC_HOME/lib:$MGC_HOME/shared/lib:$SHLIB_PATH
+        export SHLIB_PATH
+        ;;
+    "hpx")
+        SHLIB_PATH=$MGC_HOME/lib:$MGC_HOME/shared/lib:$SHLIB_PATH
+        export SHLIB_PATH
+        ;;
+    "ss5")
+        LD_LIBRARY_PATH=$MGC_HOME/lib:$MGC_HOME/shared/lib:$LD_LIBRARY_PATH:/usr/openwin/lib:
+        X11DD_DEFAULT_LINE_WIDTH=0
+        export LD_LIBRARY_PATH X11DD_DEFAULT_LINE_WIDTH
+        ;;
+    "ss6")
+        LD_LIBRARY_PATH=$MGC_HOME/lib:$MGC_HOME/shared/lib:$LD_LIBRARY_PATH:/usr/openwin/lib:
+        X11DD_DEFAULT_LINE_WIDTH=0
+        export LD_LIBRARY_PATH X11DD_DEFAULT_LINE_WIDTH
+        ;;
+    "ira")
+        LIBPATH=$MGC_HOME/lib:$MGC_HOME/shared/lib:$MGC_HOME/registry/tcodes:$LIBPATH:/usr/lib:/lib:
+#
+# See DR 105243 for description of why these variables are set to these values.
+#
+        NLSPATH=$NLSPATH:$MGC_HOME/lib/%N:$MGC_HOME/lib/%N.cat
+        LC__FASTMSG=false
+        export LC__FASTMSG LIBPATH NLSPATH
+#
+# See DR 73795 for info on this environment variable setting.
+#
+        X11DD_DEFAULT_LINE_WIDTH=0
+        export X11DD_DEFAULT_LINE_WIDTH
+        ;;
+    "ixl")
+        LD_LIBRARY_PATH=$MGC_HOME/lib:$MGC_HOME/shared/lib:$LD_LIBRARY_PATH:
+        X11DD_DEFAULT_LINE_WIDTH=0
+        export LD_LIBRARY_PATH X11DD_DEFAULT_LINE_WIDTH
+        ;;
+esac
+
+# run the program with the orig args suitably quoted
+if [ $# -eq 0 ]; then
+    exec $prog
+else
+    exec $prog "$@"
+fi

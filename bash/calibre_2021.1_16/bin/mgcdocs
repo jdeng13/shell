@@ -1,0 +1,749 @@
+#!/bin/sh
+#
+#  mgcdocs [helpfile] [-html|-pdf] [-list|-help|-usage|-feedback|-calibre]
+#
+#   Mentor Grahpics Online Help invocation script
+#
+# Copyright 2006-2014 Mentor Graphics Corporation
+#
+#    All Rights Reserved.
+#
+# THIS WORK CONTAINS TRADE SECRET
+# AND PROPRIETARY INFORMATION WHICH IS THE
+# PROPERTY OF MENTOR GRAPHICS
+# CORPORATION OR ITS LICENSORS AND IS
+# SUBJECT TO LICENSE TERMS. 
+#
+#
+
+
+# -------------------------
+# Initialize common globals
+# -------------------------
+olh_tool="olhtool"      # executable to use for launching online help
+olh_tool_ready=0        # default is 0, set to 1 when setup_olhtool() called
+olh_bin="${olh_bin:=$MGC_HOME/bin}" # default location of olh bin directory
+olh_pkg="${olh_pkg:=$MGC_HOME/pkgs/mgc_doc_utils}" # default location of pkg dir
+#olh_docpath=""         # DON'T initialize, set during derivation
+olh_derived=${olh_derived:=0}       # if flag not set, initialize to 0 (false)
+echoc="echo"            # command to use for echo w/ escaped characters
+olh_pkg_name="mgc_doc_utils"  # name of package directory
+
+#-------------------------------------------------------------------------------
+errmsg()
+#-------------------------------------------------------------------------------
+{
+    # This function echoes the arguments to stderr.
+    # Usage: errmsg [strings ...]
+    $echoc "$*" >&2
+}
+
+#-------------------------------------------------------------------------------
+is_nutc()
+#-------------------------------------------------------------------------------
+{
+    # Determines if the current platform is MKS Nutcracker.
+    # This is sometimes necessary because Cygwin will act more
+    # like UNIX/Linux than Nutcracker.
+    case "`uname -s`" in
+        [Ww][Ii][Nn][Dd][Oo][Ww][Ss]*)
+            return 0   # this is Nutcracker
+        ;;
+    esac
+    return 1  # not Nutcracker
+}
+
+# define platform dependent variables
+if `is_nutc` ; then
+    pathsep=';'
+else
+    pathsep=':'
+fi
+export pathsep
+
+#-------------------------------------------------------------------------------
+is_url()
+#-------------------------------------------------------------------------------
+{
+    # Returns 0 if first argument is a URL, 1 otherwise.
+    case "X${1}" in
+        Xhttp://*)  return 0;;
+        Xhttps://*) return 0;;
+        Xfile://*)  return 0;;
+    esac
+    return 1   # not URL
+}
+
+#-------------------------------------------------------------------------------
+find_command()
+#-------------------------------------------------------------------------------
+{
+    old_ifs="$IFS"
+    IFS="$pathsep"
+    for directory in $PATH ; do
+        if [ -x "${directory}/${1}" ]; then
+            IFS="$old_ifs"
+            echo "${directory}/${1}"
+            return 0
+        fi
+    done
+    IFS="$old_ifs"
+    return 1
+}
+
+#-------------------------------------------------------------------------------
+find_docpath()
+#-------------------------------------------------------------------------------
+{
+    # If first argument CONTAINS a valid docs directory, sets $derived to that
+    # location and returns 0, otherwise returns 1. A valid docs directory is a
+    # 'docs', 'shared', or 'doc' folder that contains 'pdfdocs' or 'htmldocs'.
+    if [ "X${1}" = "X" ]; then return 1; fi
+    for docdir in "docs" "shared" "doc"; do
+        if [ -d "${1}/${docdir}/pdfdocs" ]; then
+            derived="${1}/${docdir}/pdfdocs"
+            return 0  # found docpath
+        elif [ -d "${1}/${docdir}/htmldocs" ]; then
+            derived="${1}/${docdir}/htmldocs"
+            return 0  # found docpath
+        elif [ -d "${1}/${docdir}/system_admin_docs" ]; then
+            derived="${1}/${docdir}/system_admin_docs"
+            return 0  # found docpath
+        fi
+    done
+    return 1   # not found
+}
+
+#-------------------------------------------------------------------------------
+valid_docpath()
+#-------------------------------------------------------------------------------
+{
+    # Returns 0 if first argument is a valid docs directory, 1 otherwise.
+    if [ "X${1}" = "X" ]; then return 1; fi
+    if [ -d "${1}/pdfdocs" ]; then
+        return 0  # valid docpath
+    elif [ -d "${1}/htmldocs" ]; then
+        return 0  # valid docpath
+    elif [ -d "${1}/system_admin_docs" ]; then
+        return 0  # valid docpath
+    fi
+    return 1   # invalid docpath
+}
+
+# ----------------------------------------
+# Begin olh_docpath and olh_bin derivation {
+# ----------------------------------------
+if [ $olh_derived -ne 1 ]; then    # skip derivation if already done
+    candidate="$0";
+
+    case "X$candidate" in
+        # Accept an absolute path as provided.
+        X/*|X[A-Za-z]:[/\\]*)   candidate=$candidate;
+            ;;
+        # Offset a relative path via the current directory.
+        *)  candidate="`pwd`/${candidate}";
+            ;;
+    esac
+
+    derived=""
+    found=0
+    # Platforms have been seen with (their version of) MAXSYMLINKS as high as 16.
+    for iteration in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 ; do
+        # remove any instances of 'foo/..' or '/./'
+        while [ "X`echo $candidate | grep '/\./'`" != "X" ]; do
+            candidate=`echo $candidate | sed -e 's#/\./#/#'`
+        done
+        while [ "X`echo $candidate | grep '/[^/][^/]*/\.\./'`" != "X" ]; do
+            candidate=`echo $candidate | sed -e 's#/[^/][^/]*/\.\./#/#'`
+        done
+
+        # check if docpath derived yet
+        if [ $found -ne 1 ]; then
+            # find dirname of $candidate
+            derived=`echo $candidate | sed -e 's#/[^/]*$##'`
+
+            # Determine if the directory above us is top of MGC tree
+            if find_docpath "${derived}/.." ; then
+                # found it, so remove last leafname from path
+                derived=`echo $derived | sed -e 's#/[^/]*$##'`
+                found=1   # set flag that we found it
+            # Check if docs live outside of MGC tree (sibling)
+            elif find_docpath "${derived}/../.." ; then
+                # found it, so remove last leafname from path
+                derived=`echo $derived | sed -e 's#/[^/][^/]*$##'`
+                found=1   # set flag that we found it
+            fi
+        fi
+
+        # check for symbolic link
+        if [ -h "$candidate" ]; then
+            # resolve link destination
+            linkdst=`ls -ld $candidate | sed -e 's#.*-> ##'`;
+            case "X$linkdst" in
+                # Accept an absolute path as provided.
+                X/*)    candidate=$linkdst
+                ;;
+                # Offset a relative path via the current directory.
+                *)  candidate=`echo $candidate | sed -e 's#/[^/]*$##'`
+                    candidate="$candidate/$linkdst"
+                ;;
+            esac
+        else
+            # Found actual script file, this is the olh bin directory
+            olh_bin="`echo $candidate | sed -e 's#/[^/]*$##'`"
+            export olh_bin
+            # Locate mgc_doc_utils package (should be $olh_bin/..)
+            olh_pkg="`echo $olh_bin | sed -e 's#/[^/]*$##'`"
+            if [ -x "${olh_pkg}/local_bin/olhtool" ]; then
+                export olh_pkg
+            else
+                # Top-level bin must not be symlinked to pkg, locate manually
+                # 1. Override environment variable
+                if [ -x "${MGC_OLH_PKG_DIR}/local_bin/olhtool" ]; then
+                    olh_pkg="$MGC_OLH_PKG_DIR"
+                # 2. MGC_HOME structure
+                elif [ -x "${olh_pkg}/pkgs/${olh_pkg_name}/local_bin/olhtool" ]; then
+                    olh_pkg="${olh_pkg}/pkgs/${olh_pkg_name}"
+                # 3. package is sibling to top-level bin
+                elif [ -x "${olh_pkg}/${olh_pkg_name}/local_bin/olhtool" ]; then
+                    olh_pkg="${olh_pkg}/${olh_pkg_name}"
+                else
+                    # 4. SDD_HOME structure
+                    SDD_HOME=`echo $olh_bin | sed -e 's#/[^/]*/[^/]*/[^/]*$##'`
+                    if [ -x "${SDD_HOME}/doc_utils/linux/local_bin/olhtool" ]; then
+                        olh_pkg="${SDD_HOME}/doc_utils/linux"
+                    elif [ -x "${SDD_HOME}/doc_utils/amd64_linux/local_bin/olhtool" ]; then
+                        olh_pkg="${SDD_HOME}/doc_utils/amd64_linux"
+                    fi
+                fi
+                export olh_pkg
+            fi
+
+            if [ $found -ne 1 ]; then
+                # Found actual file, but still not doc path. This means 1 of 2 things:
+                #   1) Script is being invoked directly from 'pkgs/mgc_doc_utils/bin'
+                #   2) We're not in a supported MGC tree
+                if [ -f "$candidate" ]; then
+                    # We might be able to compensate for case 1
+                    # by moving up 3 dirs (pkgs/olh/bin).
+                    derived=`echo $derived | sed -e 's#/[^/]*/[^/]*/[^/]*$##'`
+                    if find_docpath "$derived" ; then
+                        # found it, so remove last leafname from path
+                        derived=`echo $derived | sed -e 's#/[^/]*$##'`
+                        found=1   # set flag that we found it
+                    else
+                        # move up one more dir (SDD_HOME/common/<platform>/bin)
+                        derived=`echo $derived | sed -e 's#/[^/]*$##'`
+                        if find_docpath "$derived" ; then
+                            # found it, so remove last leafname from path
+                            derived=`echo $derived | sed -e 's#/[^/]*$##'`
+                            found=1   # set flag that we found it
+                        fi
+                    fi
+                fi
+            fi
+            break  # no more links to follow
+        fi
+    done
+    unset iteration;
+    unset linkdst;
+    unset candidate;
+
+    # If product override variable is set and valid, don't use derived docpath.
+    if valid_docpath "$MGC_PRODUCT_DOC_PATH" ; then
+        olh_docpath="$MGC_PRODUCT_DOC_PATH"
+        olh_derived=1
+        export olh_derived
+    else
+        # filter out 'foo//bar' and 'foo/./bar'
+        derived=`echo $derived | sed -e 's#//#/#g' -e 's#/\./#/#g'`;
+        # remove any remaining cases of 'foo/..'
+        derived=`echo $derived | sed -e 's#/[^/][^/]*/\.\./#/#'`;
+        derived=`echo $derived | sed -e 's#/[^/][^/]*/\.\./#/#'`;
+    
+        # did we properly derive doc path?
+        if [ $found -eq 1 -a -d "$derived" ]; then
+            olh_docpath="$derived"
+            MGC_PRODUCT_DOC_PATH="$derived"    # Set MGC_PRODUCT_DOC_PATH to derived value
+            export MGC_PRODUCT_DOC_PATH        # for OLH shared library
+            olh_derived=1
+            export olh_derived
+        fi
+    fi
+
+    unset derived
+    unset found
+fi
+
+# } End olh_docpath and olh_bin derivation
+
+# ----------------------------------
+# Setup echo for supressing newlines
+# ----------------------------------
+if [ `echo -e "test\c" | wc -c` -eq 4 ]; then
+    echoc="echo -e"
+fi
+
+#-------------------------------------------------------------------------------
+setup_olhtool()
+#-------------------------------------------------------------------------------
+{
+    # --------------
+    # Locate olhtool
+    # --------------
+    # first check in derived mgc_doc_utils package directory
+    if [ -x "${olh_pkg}/local_bin/olhtool" ]; then
+        olh_tool="${olh_pkg}/local_bin/olhtool"
+    elif [ -x "${olh_bin}/olhtool" ]; then
+        olh_tool="${olh_bin}/olhtool"
+    else
+        # not found, search PATH
+        if tmp_olhtool="`find_command olhtool 2>/dev/null`" ; then
+            olh_tool="$tmp_olhtool"
+        fi
+        unset tmp_olhtool
+    fi
+    # make sure it works
+    if [ ! -x "$olh_tool" ]; then
+        # last ditch attempts
+        if [ -x "./${olh_pkg_name}/local_bin/olhtool" ]; then
+            olh_tool="`pwd`/${olh_pkg_name}/local_bin/olhtool"
+        elif [ -x "${MGC_HOME}/pkgs/${olh_pkg_name}/local_bin/olhtool" ]; then
+            olh_tool="${MGC_HOME}/pkgs/${olh_pkg_name}/local_bin/olhtool"
+        else
+            errmsg ""
+            errmsg "ERROR:  Unable to find online help invocation tool, 'olhtool'."
+            errmsg "        Your installation may not be complete!"
+            exit 1
+        fi
+    fi
+    olh_tool_ready=1
+    export olh_tool
+    export olh_tool_ready
+
+    # ------------------
+    # Setup library path
+    # ------------------
+    PATH="${olh_bin}${pathsep}${PATH}"
+    # look for lib dir next to olh bin
+    olh_lib="`echo $olh_bin | sed -e 's#/[^/]*$##'`/lib"
+    if [ ! -d "${olh_lib}" ]; then
+        # look for Mgc_home/lib dir (3 levels up from olh bin)
+        olh_lib="`echo $olh_bin | sed -e 's#/[^/]*/[^/]*/[^/]*$##'`/lib"
+    fi
+    if [ -d "${olh_lib}" ]; then
+        LD_LIBRARY_PATH="${olh_lib}${pathsep}${LD_LIBRARY_PATH}"
+        SHLIB_PATH="${olh_lib}${pathsep}${SHLIB_PATH}"
+    fi
+    unset olh_lib
+    # helpful for RHEL3...
+    if [ "`uname -s`" = "Linux" ]; then
+        LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/X11R6/lib"
+    fi
+    export LD_LIBRARY_PATH
+    export SHLIB_PATH
+    export PATH
+}
+
+#-------------------------------------------------------------------------------
+setup_docpath()
+#-------------------------------------------------------------------------------
+{
+    # Determine documentation location, full path is stored in $olh_docpath
+
+    # first make sure olhtool is available
+    if [ $olh_tool_ready -ne 1 ]; then
+        setup_olhtool
+    fi
+
+    # now get the docpath from olhtool
+    tmp_docpath="`$olh_tool getdocpath`"
+    if `is_url $tmp_docpath` ; then
+        olh_docpath="$tmp_docpath"
+        export olh_docpath
+    else
+        if [ -d "$tmp_docpath" ]; then
+            olh_docpath="`echo $tmp_docpath | sed -e 's#\\\\#/#g'`"
+            export olh_docpath
+        fi
+        if [ ! -d "$olh_docpath" ]; then
+            errmsg ""
+            errmsg "ERROR:  Unable to locate documentation!  If your Mentor Graphics documentation"
+            errmsg "        is installed in a non-standard location, set \$MGC_DOC_PATH to the"
+            errmsg "        full path.  Type 'mgcdocs -help' for more information."
+            exit 1
+        fi
+    fi
+    unset tmp_docpath
+}
+
+#-------------------------------------------------------------------------------
+get_tmpdir()
+#-------------------------------------------------------------------------------
+{
+    if [ -d "$TMPDIR" ]; then
+        olh_tmp="$TMPDIR"
+    elif [ -d "$TEMP" ]; then
+        olh_tmp="$TEMP"
+    elif [ -d "$TMP" ]; then
+        olh_tmp="$TMP"
+    elif [ -d "${MGC_HOME}/tmp" ]; then
+        olh_tmp="${MGC_HOME}/tmp"
+    else
+        if `is_nutc` ; then
+            if [ -d "${WINDIR}/Temp" ]; then
+                olh_tmp="${WINDIR}/Temp"
+            fi
+        else
+            if [ -d "/tmp" ]; then
+                olh_tmp="/tmp"
+            fi
+        fi
+    fi
+    if [ ! -d "$olh_tmp" ]; then
+        errmsg ""
+        errmsg "ERROR:  Unable to find directory for temporary files! Please set"
+        errmsg "        \$TMPDIR to a valid temporary directory."
+        exit 1
+    fi
+    echo "$olh_tmp"
+}
+
+
+# ------------------
+# Initialize globals
+# ------------------
+olh_helpdoc="_bk_mgc.pdf"  # default help file to open
+got_doc_arg=0              # did user specify doc? default is no
+got_cal_flag=0             # '-calibre' flag specified?
+list_docs=0                # default flag to list docs directory is off
+ihub_ext="_ih"             # extension used for InfoHub directories
+
+#-------------------------------------------------------------------------------
+print_usage_message()
+#-------------------------------------------------------------------------------
+{
+   $echoc "
+   Usage:  mgcdocs [helpfile] [-html|-pdf] [-list|-help|-usage|-feedback|-calibre]"
+}
+
+#-------------------------------------------------------------------------------
+print_help_message()
+#-------------------------------------------------------------------------------
+{
+    # determine command to display help message
+    if cat_cmd="`find_command less 2>/dev/null`" ; then
+        :
+    elif cat_cmd="`find_command more 2>/dev/null`" ; then
+        :
+    else
+        cat_cmd="cat"
+    fi
+
+    $cat_cmd <<EndOfHelpText
+`print_usage_message`
+   ------
+
+   Description:
+   ------------
+      Provides access to your Mentor Graphics product documentation via a
+      command line interface. Mentor Graphics documentation requires an
+      HTML, JavaScript-enabled browser. To view the list of currently supported
+      browsers and their settings, refer to:
+
+        http://supportnet.mentor.com/sysadmin/browser_requirements.cfm
+
+   Arguments:
+   ----------
+      helpfile     - (Optional) The name of the help file to open (you can
+                     type 'mgcdocs -list' to see a list of available documents).
+                     If no help file is specified, the default InfoHub or
+                     Bookcase will be opened as a starting point.
+
+      -h|-help     - Displays this information.
+
+      -u|-usage    - Displays a one-line description.
+
+      -l|-list     - Lists the available files in your documentation folder.
+
+      -f|-feedback - Opens a web browser to the 'Documentation Feedback'
+                     page on Mentor Graphics SupportNet.
+
+      -c|-calibre  - Opens directly to the Calibre InfoHub or Bookcase.
+
+      -H|-html     - Display documentation in HTML format, if available.
+                     Using this flag has the same result as setting the
+                     \$MGC_DOC_TYPE environment variable to 'html'.
+
+      -P|-pdf      - Display documentation in PDF format, if available.
+                     Using this flag has the same result as setting the
+                     \$MGC_DOC_TYPE environment variable to 'pdf'.
+
+   Optional Environment Variables:
+   ------------------------------
+      \$MGC_HTML_BROWSER    - The web browser to use for displaying HTML
+                             documentation. By default, the following browsers
+                             are searched for in the specified order:
+                               1) firefox
+                               2) mozilla
+                               3) netscape
+                             If your preferred browser is not being invoked,
+                             set this variable to either the full path of a
+                             supported web browser executable, or simply the
+                             name of the executable if it can be found through
+                             the \$PATH variable. For example, set
+                             MGC_HTML_BROWSER to "mozilla" to force HTML
+                             documentation to open in the Mozilla browser.
+
+      \$MGC_PDF_READER      - The viewer to use for PDF documentation (default
+                             is "acroread"). Set this variable to either the
+                             full path of the Acrobat executable, or simply the
+                             name of the executable if it can be found through
+                             the \$PATH variable. For example, set
+                             MGC_PDF_READER to "/opt/Acrobat7/bin/acroread".
+
+      \$MGC_DOC_PATH        - Alternate location of the product documentation
+                             tree (default location is <install_dir>/docs|doc|
+                             shared). If you move the documentation to an
+                             alternate location, set this variable to the full
+                             path to the docs directory containing infohubs,
+                             htmldocs, and pdfdocs sub-directories. Do not
+                             include infohubs, htmldocs, or pdfdocs as part of
+                             the path value. For example, set MGC_DOC_PATH to
+                             "/server1/mentor_dft_2006.1/docs".
+
+EndOfHelpText
+
+} # end of print_help_message()
+
+
+# ---------------
+# Parse arguments
+# ---------------
+for arg in "$@"; do
+    case "$arg" in
+    -h|-he|-hel|-[Hh][Ee][Ll][Pp]) print_help_message; exit 0;;
+    -u|-us|-usa|-usag|-[Uu][Ss][Aa][Gg][Ee]) print_usage_message; $echoc ""; exit 0;;
+    -l|-li|-lis|-[Ll][Ii][Ss][Tt]) list_docs=1; break;;
+    -H|-[Hh][Tt][Mm]|-[Hh][Tt][Mm][Ll])
+        MGC_DOC_TYPE="html"; export MGC_DOC_TYPE;;
+    -P|-[Pp][Dd][Ff])
+        MGC_DOC_TYPE="pdf"; export MGC_DOC_TYPE;;
+    -f|-fe|-fee|-feed|-feedb|-feedba|-feedbac|-[Ff][Ee][Ee][Dd][Bb][Aa][Cc][Kk])
+        if [ $got_doc_arg -ne 1 ]; then
+            olh_helpdoc="http://supportnet.mentor.com/doc_feedback_form.cfm"
+            got_doc_arg=1
+        else
+            errmsg "\nERROR:  Too many arguments."
+            print_usage_message
+            errmsg ""
+            exit 1
+        fi
+        ;;
+    -c|-ca|-cal|-cali|-calib|-calibr|-[Cc][Aa][Ll][Ii][Bb][Rr][Ee])
+        if [ $got_doc_arg -ne 1 ]; then
+            olh_helpdoc="_bk_calbr.pdf"
+            got_cal_flag=1
+        else
+            $echoc ""
+            $echoc "WARNING:  Help file '${olh_helpdoc}' already specified,"
+            $echoc "          ignoring '${arg}' flag."
+        fi
+        ;;
+    -*) errmsg "\nERROR:  Invalid flag '$arg'."; print_usage_message; errmsg ""; exit 1;;
+    *)  if [ $got_doc_arg -ne 1 ]; then
+            olh_helpdoc="$arg"
+            got_doc_arg=1
+            if [ "`$echoc $arg | sed -e 's#.*\(\.pdf\)#\1#'`" = ".pdf" ]; then
+                # set type to PDF if '.pdf' extension found
+                MGC_DOC_TYPE="pdf"; export MGC_DOC_TYPE
+            fi
+            case "X$olh_helpdoc" in
+                # Accept an absolute path as provided.
+                X/*|X[A-Za-z]:[/\\]*)   ;;
+                # Offset a relative path via the current directory.
+                X*/*) olh_helpdoc="`pwd`/${olh_helpdoc}" ;;
+                # accept handle as is
+                *) ;;
+            esac
+        else
+            errmsg "\nERROR:  Too many arguments."
+            print_usage_message
+            errmsg ""
+            exit 1
+        fi
+        ;;
+    esac
+done
+
+#$echoc "============================"
+#$echoc "    Mentor Graphics Help"
+#$echoc "============================"
+
+setup_olhtool
+setup_docpath
+$echoc "\nUsing documentation from:\n  ${olh_docpath}"
+
+
+# -------------------
+# Handle '-list' flag
+# -------------------
+if [ $list_docs -eq 1 ]; then
+    org_dir=`pwd`
+    if [ -d "${olh_docpath}/htmldocs" ]; then
+        cd "${olh_docpath}/htmldocs" >/dev/null
+        if ls -d * 2>/dev/null >/dev/null ; then
+            $echoc ""
+            $echoc "-----------------------"
+            $echoc "  HTML Documentation:  "
+            $echoc "-----------------------"
+            ls -d *
+        fi
+    fi
+    if [ -d "${olh_docpath}/pdfdocs" ]; then
+        cd "${olh_docpath}/pdfdocs" >/dev/null
+        if ls *.pdf 2>/dev/null >/dev/null ; then
+            $echoc ""
+            $echoc "-----------------------"
+            $echoc "  PDF Documentation:  "
+            $echoc "-----------------------"
+            ls *.pdf
+        fi
+    fi
+    if [ -d "${olh_docpath}/system_admin_docs" ]; then
+        cd "${olh_docpath}/system_admin_docs" >/dev/null
+        if ls -d *.pdf 2>/dev/null >/dev/null ; then
+            $echoc ""
+            $echoc "-----------------------"
+            $echoc "  System Admin Docs:   "
+            $echoc "-----------------------"
+            ls *.pdf
+        fi
+    fi
+    if [ -d "${olh_docpath}/infohubs" ]; then
+        cd "${olh_docpath}/infohubs" >/dev/null
+        if ls -d *${ihub_ext} 2>/dev/null >/dev/null ; then
+            $echoc ""
+            $echoc "-----------------------"
+            $echoc "       InfoHubs:       "
+            $echoc "-----------------------"
+            ls -d *${ihub_ext}
+        fi
+    fi
+    $echoc ""
+    cd "$org_dir" >/dev/null
+    exit 0
+fi
+
+
+# ---------------------
+# Determine default doc
+# ---------------------
+if [ $got_doc_arg -ne 1 ]; then
+    if `is_url $olh_docpath` ; then
+        olh_helpdoc=""
+    else
+        # check for Calibre flag
+        if [ $got_cal_flag -eq 1 ]; then
+            if [ -d "${olh_docpath}/infohubs/calbr${ihub_ext}" ]; then
+                olh_helpdoc="calbr${ihub_ext}"
+            elif [ -f "${olh_docpath}/pdfdocs/_bk_calbr.pdf" ]; then
+                olh_helpdoc="_bk_calbr.pdf"
+            else
+                errmsg ""
+                errmsg "ERROR:  Unable to find a Calibre InfoHub or Bookcase to open!"
+                errmsg "        Try using 'mgcdocs' without the '-calibre' flag.\n"
+                exit 1
+            fi
+        # check override variable
+        elif [ "X${MGC_DOC_DEFAULT}" != "X" ]; then
+            olh_helpdoc="$MGC_DOC_DEFAULT"
+        else
+            olh_default_bk="_bk_mgc.pdf"
+            if [ ! -f "${olh_docpath}/pdfdocs/${olh_default_bk}" ]; then
+                # find first bookcase in pdfdocs
+                if [ -d "${olh_docpath}/pdfdocs" ]; then
+                    orig_dir="`pwd`"
+                    cd "${olh_docpath}/pdfdocs" >/dev/null 2>/dev/null
+                    for bk in _bk_*.pdf; do
+                        if [ -f "$bk" ]; then
+                            olh_default_bk="$bk"
+                            break
+                        fi
+                    done
+                    cd "$orig_dir" >/dev/null 2>/dev/null
+                fi
+            fi
+            if [ "$MGC_DOC_TYPE" = "pdf" ]; then
+                # check for Mentor Graphics Bookcase
+                if [ -f "${olh_docpath}/pdfdocs/${olh_default_bk}" ]; then
+                    olh_helpdoc="$olh_default_bk"
+                # check for Mentor Graphics InfoHub
+                elif [ -d "${olh_docpath}/infohubs/mgc_ih" ]; then
+                    olh_helpdoc="mgc_ih"
+                # check for mgcdoc_notfound.pdf in system admin docs
+                elif [ -f "${olh_docpath}/system_admin_docs/mgcdoc_notfound.pdf" ]; then
+                    olh_helpdoc="mgcdoc_notfound.pdf"
+                else    
+                    # no default doc found, display error
+                    errmsg ""
+                    errmsg "ERROR:  Unable to locate Mentor Graphics Bookcase or InfoHub!"
+                    errmsg "        Type 'mgcdocs -list' to view available documentation."
+                    exit 1
+                fi
+            else    
+                # check for Mentor Graphics InfoHub
+                if [ -f "${olh_docpath}/infohubs/index.html" ]; then
+                    # use empty olh_helpdoc to open default InfoHub
+                    olh_helpdoc=""
+                # check for Mentor Graphics Bookcase
+                elif [ -f "${olh_docpath}/pdfdocs/${olh_default_bk}" ]; then
+                    olh_helpdoc="$olh_default_bk"
+                # check for mgcdoc_notfound.pdf in system admin docs
+                elif [ -f "${olh_docpath}/system_admin_docs/mgcdoc_notfound.pdf" ]; then
+                    olh_helpdoc="mgcdoc_notfound.pdf"
+                else
+                    # no default doc found, display error
+                    errmsg ""
+                    errmsg "ERROR:  Unable to locate Mentor Graphics InfoHub or Bookcase!"
+                    errmsg "        Type 'mgcdocs -list' to view available documentation."
+                    exit 1
+                fi
+            fi
+        fi
+    fi
+fi
+
+
+# --------------
+# Invoke olhtool
+# --------------
+$echoc "\nInvoking help viewer...  (Please allow a moment to display)"
+if [ "X${olh_helpdoc}" = "X" ]; then
+    $olh_tool infohub
+else
+    $olh_tool helpcall "$olh_helpdoc"
+fi
+
+retval=$?
+case $retval in
+# OLH_OK
+0)  exit 0
+    ;;
+# OLH_DOC_NOT_FOUND
+4)  errmsg "\nERROR:  Document not found.  Type 'mgcdocs -list' to view"
+    errmsg "        a list of the available documentation.\n"
+    exit 1
+    ;;
+# OLH_VIEWER_NOT_FOUND
+7)  errmsg "\nERROR:  Unable to locate browser or help viewer."
+    errmsg "        Type 'mgcdocs -help' for more options.\n"
+    exit 1
+    ;;
+# generic error
+*)  errmsg "\nERROR:  Help call failed for unknown reason. (Error Code: ${retval})"
+    errmsg "        Type 'mgcdocs -help' for more options.\n"
+    exit 1
+    ;;
+esac
+

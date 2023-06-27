@@ -1,0 +1,13 @@
+#!/bin/sh
+
+# Workaround for MKL hang
+# http://pevweb.wv.mentorg.com/roundup/icv_big/issue88935
+export OMP_NUM_THREADS=1
+
+# set LD_PRELOAD for MKL libs in a python module
+export PYTHON_LIB_DIR=$2/pkgs/icv_python/asp/lib
+export TCL_LIBRARY=$MGC_HOME/pkgs/icv_comp/8.6/lib/tcl
+
+export LD_LIBRARY_PATH=$PYTHON_LIB_DIR:$MGC_HOME/pkgs/icv_lib/lib64
+export PATH=$2/pkgs/icv_python/asp/bin:$PATH
+eval exec $2/pkgs/icv/pvt/python_server $1 $2  # Pass the port string and MGC_HOME

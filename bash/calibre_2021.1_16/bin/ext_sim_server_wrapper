@@ -1,0 +1,23 @@
+#!/bin/bash
+#
+# Wrapper script for setting LD_LIBRARY_PATH and running external simulation server binary,
+# to be executed as a child process from within (r)calibre.
+
+
+set -eo pipefail
+
+
+export LD_LIBRARY_PATH="\
+${CALIBRE_LD_LIBRARY_PATH_PREPEND}:\
+${CALIBRE_LD_LIBRARY_PATH_PREPEND_EXT_SIM_SERVER}:\
+${MGC_HOME}/pkgs/icv_lib/lib64:\
+"
+    # Planning to deprecate CALIBRE_LD_LIBRARY_PATH_PREPEND eventually.
+
+#suffix=`echo "$@" | sed -e 's/ /_/g'`
+#$MGC_HOME/pkgs/icv/pvt/ext_sim_server $@ > ./.ext_sim_server_${suffix}.log 2>&1
+    # Can bring this version back if needed.
+
+$MGC_HOME/pkgs/icv/pvt/ext_sim_server $@
+
+

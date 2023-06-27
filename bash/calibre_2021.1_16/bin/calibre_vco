@@ -1,0 +1,127 @@
+#!/bin/sh
+#************************************************************************CPY10*#
+#*   Copyright Mentor Graphics Corporation 2005-2020                     CPY11*#
+#*                    All Rights Reserved.                               CPY12*#
+#*                                                                       CPY13*#
+#*   THIS WORK CONTAINS TRADE SECRET AND PROPRIETARY INFORMATION         CPY14*#
+#*   WHICH IS THE PROPERTY OF MENTOR GRAPHICS CORPORATION OR ITS         CPY15*#
+#*   LICENSORS AND IS SUBJECT TO LICENSE TERMS.                          CPY16*#
+#************************************************************************CPY17*#
+#
+# When changes are made to this script the calenv export needs to be
+# be regenerated using this script:
+#   /user/icdet/bin/export_calenv_pkg
+#
+# Input environment variables:
+#   USE_CALIBRE_VCO -- if set, forces output VCO to $VCO
+#
+# Usage:
+#   calibre_vco
+#     Output: VCO suitable for the current environment
+#             If none, null string is returned with exit 1
+# or
+#   . calibre_vco
+#     Output: none (VCO var is set)
+#
+#   calibre_vco -vcos
+#     Output: List of all valid customer VCOs supported by Calibre
+#
+###############################################################################
+PATH=/usr/bin:/bin
+export PATH
+
+error_exit() {
+  echo "$1" >&2
+  echo >&2
+  # dont exit if sourced, sourcing script will see VCO='' and know there is an error
+  test `basename $0` = calibre_vco && exit 1
+}
+
+VCO=''
+test -z "$CALIBRE_HOME" && CALIBRE_HOME="$MGC_HOME"
+export CALIBRE_HOME
+CHI=$CALIBRE_HOME/pkgs/icv_calenv/pvt/calibre_host_info
+if test ! -x $CHI
+then
+  # try setting MCG_HOME to the same tree this script is being invoked from
+  mtmp=`dirname $0`/..
+  mtmp=`cd $mtmp 2>/dev/null && /bin/pwd`
+  CHI=$mtmp/pkgs/icv_calenv/pvt/calibre_host_info
+  if test -x $CHI
+  then
+    # appear to have found MGC_HOME
+    MGC_HOME=$mtmp
+    CALIBRE_HOME=$mtmp
+    export CALIBRE_HOME MGC_HOME
+  else
+    CHI=''
+  fi
+fi
+
+MGC_HOME_VCO=`cat $CALIBRE_HOME/pkgs/icv_calenv/dependencies/sw_type 2>/dev/null`
+if test -z "$CHI" -o -z "$MGC_HOME_VCO"
+then
+  error_exit 'Invalid CALIBRE_HOME/MGC_HOME'
+fi
+
+# Set the "OS_" variables
+. $CHI
+
+if test "x$1" = x-vcos -a $# -eq 1
+then
+  # just echo the valid customer VCOs and exit
+  echo 'aoi aoj aok'
+elif test $# -ne 0
+then
+  error_exit 'Usage: calibre_vco [-vcos]'
+elif test -n "$USE_CALIBRE_VCO"
+then
+  VCO=$USE_CALIBRE_VCO
+elif test \( "$OS_VENDOR" = redhat -a "$OS_MAJOR_REV" -lt 6 \) \
+       -o \( "$OS_VENDOR" = redhat -a "$OS_MAJOR_REV" -gt 8 \) \
+       -o \( "$OS_VENDOR" = sles   -a "$OS_MAJOR_REV" -lt 11 \) \
+       -o \( "$OS_VENDOR" = sles   -a "$OS_MAJOR_REV" -gt 12 \) \
+       -o -z "$OS_VENDOR"
+then
+  error_exit "Invalid operating system environment, VENDOR=$OS_VENDOR OS VERSION=$OS_MAJOR_REV"
+elif test \( "$OS_VENDOR" = redhat -a "$OS_MAJOR_REV" -eq 8 \)
+then
+  if test -n "$OS_AVX2"
+  then
+    VCO=aok
+  else
+    error_exit 'VCO "aok" is only supported on AVX2 capable hardware running RHEL 8'
+  fi
+elif test \( "$OS_VENDOR" = redhat -a "$OS_MAJOR_REV" -eq 6  -a "$OS_MINOR_REV" -ge 8 \) \
+       -o \( "$OS_VENDOR" = redhat -a "$OS_MAJOR_REV" -eq 7 \) \
+       -o \( "$OS_VENDOR" = sles   -a "$OS_MAJOR_REV" -eq 11 -a "$OS_MINOR_REV" -ge 4 \) \
+       -o \( "$OS_VENDOR" = sles   -a "$OS_MAJOR_REV" -eq 12 \)
+then
+  # only return AOJ if the host supports AVX2 and the MGC_HOME tree is an AOJ tree
+  if test "$MGC_HOME_VCO" = aoj
+  then
+    if test -n "$OS_AVX2"
+    then
+      VCO=aoj
+    else
+      if test -z "$strict_vco_check"
+      then
+        VCO=aoi
+      else
+        error_exit 'VCO "aoj" is only supported on AVX2 capable hardware running RHEL 6.8/6.9/6.10/7+, SLES 11SP4/12SP5'
+      fi
+    fi
+  else
+    VCO=aoi
+  fi
+elif test \( "$OS_VENDOR" = redhat -a "$OS_MAJOR_REV" -lt 8 \) \
+       -o \( "$OS_VENDOR" = sles   -a "$OS_MAJOR_REV" -eq 11 -a "$OS_MINOR_REV" -ge 2 \) \
+       -o \( "$OS_VENDOR" = sles   -a "$OS_MAJOR_REV" -eq 12 \)
+then
+  VCO=aoi
+else
+  error_exit "Invalid operating system environment, VENDOR=$OS_VENDOR OS VERSION=$OS_MAJOR_REV"
+fi
+
+# dont echo the VCO if the script was sourced
+test ! `basename $0` = calibre_vco || echo $VCO

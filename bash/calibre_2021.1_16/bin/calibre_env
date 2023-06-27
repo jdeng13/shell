@@ -1,0 +1,233 @@
+#!/bin/sh
+#************************************************************************CPY10*#
+#*   Copyright Mentor Graphics Corporation 2005-2020                     CPY11*#
+#*                    All Rights Reserved.                               CPY12*#
+#*                                                                       CPY13*#
+#*   THIS WORK CONTAINS TRADE SECRET AND PROPRIETARY INFORMATION         CPY14*#
+#*   WHICH IS THE PROPERTY OF MENTOR GRAPHICS CORPORATION OR ITS         CPY15*#
+#*   LICENSORS AND IS SUBJECT TO LICENSE TERMS.                          CPY16*#
+#************************************************************************CPY17*#
+#
+#
+# IMPORTANT NOTICE: This script may make reference to environments that
+# are obsolete, experimental, under consideration, or simply reserved for
+# *possible* future usage. Reference to or recognition of an environment
+# by this script does not imply any support, current or future, by Mentor
+# Graphics Corporation.
+#
+###############################################################################
+#
+# When changes are made to this script the calenv export needs to be
+# be regenerated using this script:
+#   /user/icdet/bin/export_calenv_pkg
+#
+# NB: If additions or changes are made to any header lines (e.g. RHEL 5
+# warning message) this may impact the systests, requiring additional
+# patterns to be filtered out via the script/filter file.
+#
+# Input environment variables:
+#   CALIBRE_SKIP_OS_CHECKS -- if set, most OS warnings/errors/checks are skipped
+#   CALIBRE_SHOW_ENV_VARS -- if set, show env vars pertinent to Calibre
+#
+# Usage:
+#   . calibre_env       ## must be sourced
+#     Output: None; warnings and errors written to <stderr>
+#     Following environment variables are set:
+#       CALIBRE_DISABLE_MT_INJECTION -- set if $LITHO_CHECKPOINT_PATH
+#       MGC_LANG -- set to "En_na"
+#       MGC_VCO  -- VCO for the current environment
+#       MGC_WKSTN -- human readable description of the current environment
+#
+#   VCO values:
+#     aoi -- Intel x86, RHEL 6+, RHEL 7+, SLES 11 SP2+, SLES 12SP3 (AVX2 not required)
+#     aoj -- Intel x86, RHEL 6.8+, RHEL 7_  SLES 11 SP4, SLES 12SP3 (AVX2 required)
+#     aok -- Intel x86, RHEL 8+ (AVX2 required)
+#     
+# see $MGC_HOME/bin/calibre for a typical usage scenario for this script.
+##############################################################################
+
+progname=`basename $0`
+dirname=`dirname $0`
+
+# attempt to ensure we are pointing to an appropriate MGC_HOME tree
+if test -z "$CALIBRE_HOME"
+then
+  # CALIBRE_HOME is not set, use MGC_HOME
+  CALIBRE_HOME="$MGC_HOME"
+else
+  if test -n "$MGC_HOME" -a "$MGC_HOME" != "$CALIBRE_HOME"
+  then
+    # both are set, and are different
+    test -z "$CALIBRE_SKIP_OS_CHECKS" \
+      && echo "WARNING: \$CALIBRE_HOME and \$MGC_HOME are different, using \$CALIBRE_HOME=$CALIBRE_HOME" >&2
+  fi
+fi
+
+# ensure both are set the same
+MGC_HOME="$CALIBRE_HOME"
+export CALIBRE_HOME MGC_HOME
+
+normalized_MGC_HOME=`cd $MGC_HOME && /bin/pwd`
+cleanedup_MGC_HOME=`echo $MGC_HOME | sed -e 's!///*!/!' -e 's!/* *$!!'`
+# where was the program invoked from, and does it match the MGC_HOME seting
+dir=`cd $dirname && /bin/pwd`
+dir=`echo $dir | sed -e 's!/bin.*!!' -e 's!/pkgs/.*!!' -e 's!/shared/.*!!'`
+
+# try to ensure have appropriate MGC_HOME tree
+MGC_VCO=`strict_vco_check=yes $MGC_HOME/bin/calibre_vco`
+test -z "$MGC_VCO" && exit 1 
+
+type_file=$CALIBRE_HOME/pkgs/icv_calenv/dependencies/sw_type
+if test -r $type_file
+then
+  SW_WKSTN=`cat $type_file` 
+else
+  echo "ERROR: Invalid Calibre software tree, $CALIBRE_HOME/pkgs/icv_calenv/dependencies/sw_type either not readable or is missing." >&2
+  exit 1
+fi
+
+# pointing to an incorrect MGC_HOME tree for this VCO
+# autoswitching MGC_HOME trees was only supported for AOH/AOI
+if test "$SW_WKSTN" != "$MGC_VCO"
+then
+  echo "ERROR: Current execution environment is VCO=$MGC_VCO. Software tree is for environment VCO=$SW_WKSTN." >&2
+ exit 1
+fi
+
+# set up vars for TCL
+# http://pevweb.wv.mentorg.com/roundup/icv_big/issue77455
+TCL_VERSION=`cd $MGC_HOME/pkgs/icv_comp && ls 2>/dev/null -dc [0-9]*.[0-9]* `
+test `echo $TCL_VERSION | wc -w` != 1 && TCL_VERSION=''
+if test "$TCL_VERSION" = '8.4' -o "$TCL_VERSION" = '8.6'
+then
+  unset LANG
+  TCL_LIBRARY=$MGC_HOME/pkgs/icv_comp/$TCL_VERSION/lib/tcl
+  TK_LIBRARY=$MGC_HOME/pkgs/icv_comp/$TCL_VERSION/lib/tk
+  ITCL_LIBRARY=$MGC_HOME/pkgs/icv_comp/$TCL_VERSION/lib/itcl
+  ITK_LIBRARY=$MGC_HOME/pkgs/icv_comp/$TCL_VERSION/lib/itk
+  export TCL_LIBRARY TK_LIBRARY ITCL_LIBRARY ITK_LIBRARY
+
+# only pre-pend standard directories if TCLLIBPATH is already set to a custom value
+  if test -n "$TCLLIBPATH"
+  then
+    case "$TCL_VERSION" in
+    8.6) dirs='lib/itk4.1.0 lib/tklib0.6 lib/vfs1.4.2/template lib/tcllib1.18 lib/tk/ttk lib/tk lib lib/tcl'
+         ;;
+    8.4) dirs='lib/iwidgets4 lib/tablelist/scripts lib/itk3.2 lib/blt2.4 lib/tk lib/tcllib lib/tcllib-1.8 lib lib/tcl'
+         ;;
+    esac
+    for dir in $dirs
+    do
+      TCLLIBPATH="$MGC_HOME/pkgs/icv_comp/$TCL_VERSION/$dir $TCLLIBPATH"
+    done
+  fi
+else
+  echo "ERROR: Cannot identify TCL version in $MGC_HOME/pkgs/icv_comp" >&2
+fi
+
+vco_pcovg=`echo $MGC_HOME | sed -n '/pcovg/ p'`
+if test -n "$vco_pcovg" -a -z "$PURECOVOPTIONS" -a -z "$PURECOV_MODE"
+then
+  echo "ABORTING: PURECOVOPTIONS or PURECOV_MODE should be set!" >&2
+  exit 1
+fi
+
+result_dir=''
+for dir in "$MGC_TMPDIR" "$MGC_HOME/tmp" /usr/tmp /tmp
+do
+  if test -n "$dir"
+  then
+    dir=`cd $dir 2>/dev/null && /bin/pwd`
+    test -d "$dir" -a -w "$dir" || continue
+    result_dir="$dir" 
+    break
+  fi
+done
+MGC_TMPDIR="$result_dir"
+export MGC_TMPDIR
+
+if test "$CALIBRE_SHOW_ENV_VARS"
+then
+  WCALTMP=`mktemp -d -p $MGC_TMPDIR calibre.XXXXXXXX`
+  if test -z "$WCALTMP"
+  then
+    echo "ERROR: Could not allocate temp directory in $MGC_TMPDIR" >&2
+    exit 1
+  fi
+  env | sort -u >$WCALTMP/.$$env.start
+fi
+
+if test ! -z "$LITHO_CHECKPOINT_PATH"
+then
+  CALIBRE_DISABLE_MT_INJECTION=1 ; export CALIBRE_DISABLE_MT_INJECTION
+fi
+
+CALIBRE_ATOMIC_LVHEAP=0
+export CALIBRE_ATOMIC_LVHEAP
+
+# default language to English if not set
+test -z "$MGC_LANG" && MGC_LANG=En_na ; export MGC_LANG
+
+# normalize values for env vars which may be set by users
+for var in CALIBRE_SKIP_OS_CHECKS SKIP_OS_CHECKS SKIP_CALIBRERC
+do
+  value=`eval echo \\$$var`
+  case "$value" in
+    1*|[yY]*|[tT]*)     newvalue=1   ## 1, YES, TRUE ==> 1
+    ;;
+    0*|[nN]*|[fF]*|"")  newvalue=''  ## 0, NO, FALSE, "" ==> ""
+    ;;
+    *)  echo "WARNING: Invalid value $var=$value, assuming $var=TRUE." >&2
+        newvalue=1
+    ;;
+  esac
+  test "$value" = "$newvalue" || eval "$var=$newvalue ; export $var"
+done
+
+# SKIP_OS_CHECKS is deprecated in favor of CALIBRE_SKIP_OS_CHECKS
+if test -n "$CALIBRE_SKIP_OS_CHECKS$SKIP_OS_CHECKS"
+then
+  # at least one is set, make sure both are set
+  CALIBRE_SKIP_OS_CHECKS=1
+  export CALIBRE_SKIP_OS_CHECKS
+  SKIP_OS_CHECKS=1
+fi
+MGC_WKSTN=`uname -s`
+
+MGC_WKSTN="$MGC_WKSTN x86"
+
+# Don't know whether this ought to be done for ao*, but no one is complaining...
+if test "$MGC_VCO" = "aoi"
+then
+  # dont override XKEYSYMDB if already set, make sure target file exists
+  if test -z "$XKEYSYMDB" -a -r /usr/share/X11/XKeysymDB
+  then
+    XKEYSYMDB=/usr/share/X11/XKeysymDB
+    export XKEYSYMDB
+  fi 
+  # set default font path for Xvfb server
+  if test -r /usr/share/X11/fonts/misc
+  then
+    DEFAULTFONTPATH='-fp /usr/share/X11/fonts/misc -co /usr/share/X11/rgb'
+    export DEFAULTFONTPATH
+  fi
+fi
+
+if test -n  "$CALIBRE_SHOW_ENV_VARS"
+then
+  echo '## ' >&2
+  echo "## `date` -- `uname -a`" >&2
+  echo '## ' >&2
+  env | sort -u >$WCALTMP/.$$env.finish
+  echo '## Environment variables set before entering the calibre_env script:' >&2
+  echo '## -----------------------------------------------------------------' >&2
+  comm -2 $WCALTMP/.$$env.start $WCALTMP/.$$env.finish | sed -e "s![ 	]*!!g" -e "s!^!## !" \
+    | egrep 'CALIBRE|SKIP_OS|SW_WKSTN|MGC_|CWB_|LD_ASSUME_KERNEL|_PATH|LICENSE_FILE' | egrep -v '_RTN|MAN|COMPOSITE|NET|SERVER' >&2
+  echo '## ' >&2
+  echo '## Environment variables set or changed by the calibre_env script:' >&2
+  echo '## ---------------------------------------------------------------' >&2
+  comm -13 $WCALTMP/.$$env.start $WCALTMP/.$$env.finish | sed -e "s![ 	]*!!g" -e "s!^!## !" >&2
+  echo '## ' >&2
+  test -d "$WCALTMP" && rm -rf "$WCALTMP" 
+fi
+

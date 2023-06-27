@@ -1,0 +1,87 @@
+#!/bin/sh
+#
+#  mgls_child_ver
+#
+#  Copyright 1992-2017 Mentor Graphics Corporation
+#  All Rights Reserved.
+#
+#
+
+our_name=`basename $0`             #  the name of this script
+
+#
+#  Use the RANDOM environment variable value in an attempt
+#  to prevent file name collisions.
+#
+tmp_name=/tmp/child_strings.$$.$RANDOM
+
+#
+#  Setup to trap common signals and remove the temp file
+#  if one of the signals is received.
+#
+trap "rm -f $tmp_name" SIGHUP SIGINT SIGTERM
+if [ -r $tmp_name ]; then
+   rm -f $tmp_name
+fi
+
+#
+#  Determine the path to the mgls_asynch in this order:
+#
+#     1) If $MGLS_HOME is set, the path is $MGLS_HOME/lib/mgls_asynch
+#     2) If $MGC_HOME is set, the path is $MGC_HOME/lib/mgls_asynch
+#     3) The path provided to this script
+#
+if [ X$1 = X ]; then
+   if [ X$MGLS_HOME != X ]; then
+      child_path=$MGLS_HOME/lib/mgls_asynch
+   else
+      if [ X$MGC_HOME != X ]; then
+         child_path=$MGC_HOME/lib/mgls_asynch
+      fi
+   fi
+else
+   child_path=$1
+fi
+
+#
+#  Check to make sure we have a path to the mgls_asynch;
+#  it's possible neither MGLS_HOME nor MGC_HOME are set
+#  and the path to mgls_asynch was not provided to this
+#  script.
+#
+if [ X$child_path = X ]; then
+    echo $our_name: No MGLS child process specified.
+    echo $our_name: usage: $our_name [ path-to-MGLS-child ]
+    exit 1
+fi
+
+if [ ! -f $child_path -o ! -r $child_path ]; then
+    echo $our_name: MGLS child not found or file is not readable.
+    exit 1
+fi
+
+#
+#  We're going to open the permissions on the tmp file to ensure
+#  it's subsequently removed.
+#
+strings $child_path > $tmp_name
+chmod 777 $tmp_name
+
+grep mgls82 $tmp_name > /dev/null  # it may be the oldest version
+if [ $? = 0 ]; then  # it is!
+    rm -f $tmp_name
+    echo v8.2_1.3
+    exit 0
+fi
+
+ver=`grep MGLS_v1-0_ $tmp_name`  # maybe the next-to-oldest version
+if [ $? = 0 ]; then  # old version number found
+    rm -f $tmp_name
+    echo $ver
+    exit 0
+fi
+
+rm -f $tmp_name
+ver=`$child_path -v`  #  newer versions of mgls_asynch return version with -v switch
+echo $ver
+exit 0

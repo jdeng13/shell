@@ -1,0 +1,165 @@
+#!/bin/sh
+#************************************************************************CPY11*#
+#*   Copyright Mentor Graphics Corporation 2011  All Rights Reserved.    CPY12*#
+#*                                                                       CPY13*#
+#*   THIS WORK CONTAINS TRADE SECRET AND PROPRIETARY INFORMATION         CPY14*#
+#*   WHICH IS THE PROPERTY OF MENTOR GRAPHICS CORPORATION OR ITS         CPY15*#
+#*   LICENSORS AND IS SUBJECT TO LICENSE TERMS.                          CPY16*#
+#************************************************************************CPY17*#
+PATH=/usr/bin:/bin
+export PATH
+
+# ensure that CALIBRE_HOME is set
+if test -z "$CALIBRE_HOME"
+then
+  # CALIBRE_HOME is not set, use MGC_HOME
+  CALIBRE_HOME="$MGC_HOME"
+else
+  if test -z "$MGC_HOME"
+  then
+    # MGC_HOME is not set, use CALIBRE_HOME
+    MGC_HOME="$CALIBRE_HOME"
+  else
+    if test "$MGC_HOME" = "$CALIBRE_HOME"
+    then
+      # both are set, but are the same -- no problem
+      :
+    else
+      # both are set, and are different
+      echo "WARNING: \$CALIBRE_HOME and \$MGC_HOME are different, using \$CALIBRE_HOME=$CALIBRE_HOME" >&2
+      MGC_HOME="$CALIBRE_HOME"
+    fi
+  fi
+fi
+export CALIBRE_HOME MGC_HOME
+
+# set LD_LIBRARY_PATH
+. $CALIBRE_HOME/pkgs/icv/pvt/set_shared_library_path
+
+# if not caltvfencrypt is called , just execute as usual
+progname=`basename $0`
+cmd_line_args=$@
+if test $progname != "caltvfencrypt"
+then
+  if test $progname == "calzip"
+  then
+      exec $CALIBRE_HOME/pkgs/icv_inhouse/pvt/$progname "$@" ;  
+  elif test $progname == "bspef_dump"
+  then
+      exec $CALIBRE_HOME/pkgs/icv_inhouse/pvt/$progname "$@" ;  
+  else
+      exec $CALIBRE_HOME/pkgs/icv/pvt/$progname "$@" ;
+  fi
+else
+
+  # function define_args() parses command line arguments, removes "-E", "-tvfarg <arg>", and builds command lines for "calibre -E" and "caltvfencrypt" calls
+  define_args() {
+  
+  has_id=0
+  has_tvfarg=0
+  first_arg_seen=0
+  check=0
+  
+  # arguments parsing
+  for opt in $cmd_line_args
+  do
+    # get id value if -id was specified 
+    if test $has_id -eq 1
+    then 
+        has_id=2
+        caltvf_args="$caltvf_args $APOST$opt$APOST";
+    # get tvfarg value if -tvfarg was specified
+    elif test $has_tvfarg -eq 1
+        then
+        has_tvfarg=2
+        tvfarg="$tvfarg $APOST$opt$APOST";
+    # skip -id, -new, -old, - both
+    elif test "x$opt" = "x-id"
+     then
+        has_id=1
+        caltvf_args="$caltvf_args $APOST$opt$APOST";
+     elif test "x$opt" = "x-new"
+     then
+        caltvf_args="$caltvf_args $APOST$opt$APOST";
+     elif test "x$opt" = "x-old"
+     then
+        caltvf_args="$caltvf_args $APOST$opt$APOST";
+     elif test "x$opt" = "x-both"
+     then
+        caltvf_args="$caltvf_args $APOST$opt$APOST";
+    # if -E was not specified earlier, add -E to calibre args, skip otherwise  
+     elif test "x$opt" = "x-E"
+     then
+        if test $check -eq 0 
+            then
+            calibre_args="$calibre_args $APOST$opt /dev/null$APOST";
+            check=1
+        else
+            caltvf_args="$caltvf_args $APOST$opt$APOST";
+        fi
+    # if -tvfarg was not specified earlier, add -tvfarg to calibre args, skip otherwise  
+     elif test "x$opt" = "x-tvfarg"
+     then
+        if test $has_tvfarg -eq 0 
+            then
+            tvfarg="$tvfarg $APOST$opt$APOST";
+            has_tvfarg=1
+        else
+            caltvf_args="$caltvf_args $APOST$opt$APOST";
+        fi
+    # if this is first non-option consider as input file name, add to calibre and caltvfencrypt options
+     else
+        if test $first_arg_seen -eq 0
+        then 
+          first_arg_seen=1
+          tcl_file="$opt";
+          caltvf_args="$caltvf_args $APOST$opt$APOST";
+        else
+          caltvf_args="$caltvf_args $APOST$opt$APOST";
+        fi
+     fi
+done
+
+# add input file name to calibre options
+if test $check -eq 1
+then
+calibre_args="$calibre_args $APOST$tcl_file$APOST";
+fi
+}
+
+# parse arguments
+define_args ;
+
+
+if test $has_tvfarg -eq 1
+then
+    # -tvfarg was specified without value
+    echo "ERROR: -tvfarg is specified without a value" #>&2 ;
+    exit 1 ;
+else
+    if test $check -eq 1
+    then
+        # run calibre -E
+        $CALIBRE_HOME/pkgs/icv/pvt/calibre  $calibre_args $tvfarg;
+        if test  "$?" != "0" 
+        then
+            # exit when error occurs
+            exit 1 ;
+        fi
+    elif test $has_tvfarg -eq 2
+        then
+        echo "ERROR: -tvfarg is specified without -E" #>&2 ;
+        exit 1 ;
+    fi
+fi
+
+
+# exec caltvfencrypt
+if [ ! -z "$MK_CROSSCOMPILE" ]
+then
+    exec /user/cal_nightly/latest/ic/ic_superproj/$VCO/Mgc_home/pkgs/icv/pvt/$progname $caltvf_args ;
+else
+    exec $CALIBRE_HOME/pkgs/icv/pvt/$progname $caltvf_args ;
+fi
+
+fi

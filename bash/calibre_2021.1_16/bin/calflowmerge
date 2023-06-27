@@ -1,0 +1,45 @@
+#!/bin/sh
+my_args="<svrf1> <svrf2> [<svrf3> ...] [-t <tag1>,<tag2>[,<tag3> ...]] -o <svrf>"
+
+if [ -z "$MGC_HOME" ]
+then
+   echo "ERROR: MGC_HOME is not defined."
+   echo ""
+   exit
+fi
+
+if [ $# -lt 1 ]
+then
+  echo "ERROR: No arguments are specified"
+  echo "Syntax: $0 $my_args"
+  echo ""
+  exit
+fi
+
+if [ $# -lt 2 ]
+then
+  echo "ERROR: Insufficient arguments are specified"
+  echo "Syntax: $0 $my_args"
+  echo ""
+  exit
+fi
+
+echo TITLE \"PTO Integrator: $@\" > dummy.svrf
+echo "" >> dummy.svrf
+echo 'LAYOUT SYSTEM oasis' >> dummy.svrf
+touch /tmp/fsi_dummy.oas
+echo 'LAYOUT PATH "/tmp/fsi_dummy.oas"' >> dummy.svrf
+echo 'LAYOUT PRIMARY "*"' >> dummy.svrf
+echo 'PRECISION 1000' >> dummy.svrf
+echo 'DRC RESULTS DATABASE "/tmp/fsi_dummy_out.oas" OASIS PSEUDO' >> dummy.svrf
+echo "" >> dummy.svrf
+echo 'LAYER target 1' >> dummy.svrf
+echo 'target {copy target } drc check map target 1' >> dummy.svrf
+
+$MGC_HOME/bin/calibre -pto dummy.svrf
+
+# Clean up if no error
+if [ $? -eq 0 ]
+then
+    rm -f dummy.svrf dummy.oas.fvi
+fi
